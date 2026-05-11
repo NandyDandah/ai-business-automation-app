@@ -40,4 +40,4 @@ python -m uvicorn app.main:app --reload
 
 ![Lead Scoring](screenshots/Leadscoring.PNG)
 
-![Pipeline](screenshots/Pipeline.PNG)S
+![Pipeline](screenshots/Pipeline.PNG)
