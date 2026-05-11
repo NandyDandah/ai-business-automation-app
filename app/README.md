@@ -31,3 +31,13 @@ python -m venv venv
 venv\Scripts\activate
 pip install fastapi uvicorn sqlalchemy pydantic
 python -m uvicorn app.main:app --reload
+
+## Screenshots
+
+![Automation App](screenshots/Automationapp.PNG)
+
+![Dashboard](screenshots/Dashboard.PNG)
+
+![Lead Scoring](screenshots/Leadscoring.PNG)
+
+![Pipeline](screenshots/Pipeline.PNG)S
