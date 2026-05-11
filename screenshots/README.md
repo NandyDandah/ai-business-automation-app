@@ -1,6 +1,9 @@
-## Screenshots
+# Screenshots
 
-![Pipeline](screenshots/pipeline.png)
-![Dashboard](screenshots/Dashboard.png)
-![Leadscoring](screenshots/Leadscoring.png)
-![Automationapp](screenshots/Automationapp.png)
+![Dashboard](dashboard.png)
+
+![Pipeline](pipeline.png)
+
+![Lead Scoring](leadscoring.png)
+
+![Automation App](automationapp.png)
