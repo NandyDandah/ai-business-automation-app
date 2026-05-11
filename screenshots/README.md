@@ -1,9 +1,9 @@
 ## Screenshots
 
-![Dashboard](screenshots/pipeline.png)
+![Pipeline](screenshots/pipeline.png)
 ![Dashboard](screenshots/Dashboard.png)
-![Dashboard](screenshots/Leadscoring.png)
-![Dashboard](screenshots/Automationapp.png)
+![Leadscoring](screenshots/Leadscoring.png)
+![Automationapp](screenshots/Automationapp.png)
 
 git add .
 git commit -m "Added project screenshots"
