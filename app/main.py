@@ -1,14 +1,174 @@
-from fastapi import FastAPI, Depends
-from fastapi.responses import HTMLResponse, StreamingResponse
+import csv
+import hmac
+import os
+import time
+from collections import defaultdict, deque
+from html import escape as escape_html
+from threading import Lock
+from typing import Literal
+from io import StringIO
+
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from io import StringIO
-import csv
+
+load_dotenv()
+
+from app.database import SessionLocal, Automation, create_tables
+from app.ai_service import analyse_business_message
+from app.security import (
+    LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
+    get_session_csrf_token, load_auth_config, verify_api_token, verify_login_csrf, verify_password,
+)
+
+AUTH_CONFIG = load_auth_config()
 
 from app.database import SessionLocal, Automation, create_tables
 from app.ai_service import analyse_business_message
 
 app = FastAPI(title="AI Business Automation App")
+
+
+_LOGIN_ATTEMPTS = defaultdict(deque)
+_LOGIN_LOCK = Lock()
+_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+
+def _auth_method(request: Request):
+    authorization = request.headers.get("authorization")
+    if authorization is not None:
+        scheme, sep, token = authorization.partition(" ")
+        return "bearer" if scheme.lower() == "bearer" and sep and verify_api_token(token, AUTH_CONFIG) else None
+    return "session" if get_session_csrf_token(request.cookies.get("app_session", ""), AUTH_CONFIG) else None
+
+
+def _security_headers(response):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net data:; "
+        "img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none'"
+    )
+    if AUTH_CONFIG.cookie_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
+@app.middleware("http")
+async def protect_routes(request: Request, call_next):
+    if request.url.path == "/login":
+        response = await call_next(request)
+    else:
+        method = _auth_method(request)
+        if method is None:
+            if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+                response = RedirectResponse("/login", status_code=303)
+            else:
+                response = JSONResponse({"detail": "Authentication required"}, status_code=401,
+                                        headers={"WWW-Authenticate": "Bearer"})
+        elif method == "session" and request.method in _MUTATING:
+            expected = get_session_csrf_token(request.cookies.get("app_session", ""), AUTH_CONFIG)
+            if not expected or not hmac.compare_digest(expected, request.headers.get("x-csrf-token", "")):
+                response = JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
+            else:
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
+    return _security_headers(response)
+
+
+def _protected_page(markup: str, request: Request):
+    token = get_session_csrf_token(request.cookies.get("app_session", ""), AUTH_CONFIG)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    markup = markup.replace("<head>", f'<head>\n<meta name="csrf-token" content="{escape_html(token, quote=True)}">', 1)
+    logout = (
+        '<button type="button" id="logoutButton">Log out</button><script>'
+        'document.getElementById("logoutButton").addEventListener("click", async function () {'
+        'const csrf=document.querySelector("meta[name=csrf-token]").content;'
+        'const r=await fetch("/logout",{method:"POST",headers:{"X-CSRF-Token":csrf}});'
+        'if(r.ok)location.href="/login";});</script>'
+    )
+    return HTMLResponse(markup.replace("</body>", logout + "</body>", 1))
+
+
+def _login_page(message="", code=200):
+    token = create_login_csrf(AUTH_CONFIG)
+    error = f'<p role="alert">{escape_html(message)}</p>' if message else ""
+    page = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in</title><style>body{{font-family:Arial;max-width:440px;margin:12vh auto;padding:0 20px;background:#f7f7f7}}main{{background:white;padding:28px;border-radius:12px}}input,button{{box-sizing:border-box;width:100%;padding:12px;margin-top:12px;font-size:16px}}</style></head>
+<body><main><h1>Sign in</h1><p>Enter the app password to open saved lead records.</p>{error}
+<form method="post" action="/login"><input type="hidden" name="csrf_token" value="{escape_html(token, quote=True)}">
+<label for="password">App password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit">Sign in</button></form></main></body></html>"""
+    response = HTMLResponse(page, status_code=code)
+    response.set_cookie("app_login_csrf", token, max_age=LOGIN_CSRF_MAX_AGE, httponly=True,
+                        secure=AUTH_CONFIG.cookie_secure, samesite="strict", path="/")
+    return response
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form():
+    return _login_page()
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login(request: Request, password: str = Form(..., min_length=1, max_length=1024),
+          csrf_token: str = Form(...)):
+    cookie = request.cookies.get("app_login_csrf", "")
+    if not verify_login_csrf(cookie, csrf_token, AUTH_CONFIG):
+        return _login_page("Sign-in form expired. Please try again.", 403)
+    key = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _LOGIN_LOCK:
+        attempts = _LOGIN_ATTEMPTS[key]
+        while attempts and now - attempts[0] > 900:
+            attempts.popleft()
+        if len(attempts) >= 5:
+            return _login_page("Too many attempts. Wait 15 minutes and try again.", 429)
+    if not verify_password(password, AUTH_CONFIG.password_hash):
+        with _LOGIN_LOCK:
+            _LOGIN_ATTEMPTS[key].append(now)
+        return _login_page("The password is incorrect.", 401)
+    with _LOGIN_LOCK:
+        _LOGIN_ATTEMPTS.pop(key, None)
+    session, _ = create_session(AUTH_CONFIG)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie("app_session", session, max_age=SESSION_MAX_AGE, httponly=True,
+                        secure=AUTH_CONFIG.cookie_secure, samesite="strict", path="/")
+    response.delete_cookie("app_login_csrf", path="/", httponly=True,
+                           secure=AUTH_CONFIG.cookie_secure, samesite="strict")
+    return response
+
+
+@app.post("/logout")
+def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("app_session", path="/", httponly=True,
+                           secure=AUTH_CONFIG.cookie_secure, samesite="strict")
+    return response
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version="1.0.0", routes=app.routes)
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})["BearerAuth"] = {
+        "type": "http", "scheme": "bearer", "bearerFormat": "API token"
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    for operation in schema.get("paths", {}).get("/login", {}).values():
+        operation["security"] = []
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 create_tables()
 
@@ -24,8 +184,8 @@ def get_db():
         db.close()
 
 @app.get("/", response_class=HTMLResponse)
-def home():
-    return """
+def home(request: Request):
+    return _protected_page("""
 <!DOCTYPE html>
 <html>
 <head>
@@ -54,13 +214,20 @@ def home():
     </div>
 
     <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        function escapeHtml(value) {
+            const replacements = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+            return String(value ?? "").replace(/[&<>"']/g, function (character) {
+                return replacements[character];
+            });
+        }
         async function runAutomation() {
             const email = document.getElementById("email").value;
             const message = document.getElementById("message").value;
 
             const response = await fetch("/automate", {
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
+                headers: {"Content-Type": "application/json", "X-CSRF-Token": csrfToken},
                 body: JSON.stringify({email, message})
             });
 
@@ -69,17 +236,17 @@ def home():
             document.getElementById("result").innerHTML = `
                 <div class="result">
                     <h3>Automation Complete</h3>
-                    <p><strong>Category:</strong> ${data.category}</p>
-                    <p><strong>Priority:</strong> ${data.priority}</p>
-                    <p><strong>Lead Score:</strong> ${data.lead_score}/100</p>
-                    <p><strong>Reply:</strong> ${data.ai_reply}</p>
+                    <p><strong>Category:</strong> ${escapeHtml(data.category)}</p>
+                    <p><strong>Priority:</strong> ${escapeHtml(data.priority)}</p>
+                    <p><strong>Lead Score:</strong> ${escapeHtml(data.lead_score)}/100</p>
+                    <p><strong>Reply:</strong> ${escapeHtml(data.ai_reply)}</p>
                 </div>
             `;
         }
     </script>
 </body>
 </html>
-"""
+""", request)
 
 @app.post("/automate")
 def automate(request: AutomationRequest, db: Session = Depends(get_db)):
@@ -141,7 +308,7 @@ def delete_record(record_id: int, db: Session = Depends(get_db)):
     return {"message": "Deleted"}
 
 @app.put("/history/{record_id}/status")
-def update_status(record_id: int, new_status: str, db: Session = Depends(get_db)):
+def update_status(record_id: int, new_status: Literal["New", "Contacted", "Closed"], db: Session = Depends(get_db)):
     record = db.query(Automation).filter(Automation.id == record_id).first()
 
     if not record:
@@ -203,8 +370,8 @@ def export_records(db: Session = Depends(get_db)):
     )
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
-    return """
+def dashboard(request: Request):
+    return _protected_page("""
 <!DOCTYPE html>
 <html>
 <head>
@@ -271,6 +438,13 @@ def dashboard():
     <div id="records">Loading...</div>
 
     <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        function escapeHtml(value) {
+            const replacements = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+            return String(value ?? "").replace(/[&<>"']/g, function (character) {
+                return replacements[character];
+            });
+        }
         let allData = [];
 
         async function loadHistory() {
@@ -293,19 +467,19 @@ def dashboard():
 
             document.getElementById("records").innerHTML = data.map(item => `
                 <div class="card">
-                    <p><strong>Email:</strong> ${item.customer_email || "No email"}</p>
-                    <p><strong>Message:</strong> ${item.customer_message}</p>
+                    <p><strong>Email:</strong> ${escapeHtml(item.customer_email || "No email")}</p>
+                    <p><strong>Message:</strong> ${escapeHtml(item.customer_message)}</p>
 
                     <p>
-                        <span class="badge cat">${item.category}</span>
-                        <span class="badge ${item.priority}">${item.priority}</span>
+                        <span class="badge cat">${escapeHtml(item.category)}</span>
+                        <span class="badge ${escapeHtml(item.priority)}">${escapeHtml(item.priority)}</span>
                     </p>
 
-                    <p><strong>Status:</strong> ${item.status}</p>
-                    <p><strong>Lead Score:</strong> ${item.lead_score}/100</p>
+                    <p><strong>Status:</strong> ${escapeHtml(item.status)}</p>
+                    <p><strong>Lead Score:</strong> ${escapeHtml(item.lead_score)}/100</p>
 
                     <p><strong>Follow-up:</strong></p>
-                    <input type="date" id="followup-${item.id}" value="${item.follow_up_date || ""}">
+                    <input type="date" id="followup-${item.id}" value="${escapeHtml(item.follow_up_date || "")}">
                     <button onclick="updateFollowUp(${item.id})">Save Follow-up</button>
                     <button onclick="clearFollowUp(${item.id})">Mark Done</button>
 
@@ -316,10 +490,10 @@ def dashboard():
                         <option value="Closed">Closed</option>
                     </select>
 
-                    <p><strong>AI Reply:</strong> ${item.ai_reply}</p>
+                    <p><strong>AI Reply:</strong> ${escapeHtml(item.ai_reply)}</p>
 
                     <p><strong>Notes:</strong></p>
-                    <textarea id="notes-${item.id}">${item.notes || ""}</textarea>
+                    <textarea id="notes-${item.id}">${escapeHtml(item.notes || "")}</textarea>
                     <button onclick="updateNotes(${item.id})">Save Notes</button>
 
                     <br><br>
@@ -358,30 +532,30 @@ def dashboard():
         }
 
         async function updateStatus(id, status) {
-            await fetch(`/history/${id}/status?new_status=${status}`, { method: "PUT" });
+            await fetch(`/history/${id}/status?new_status=${status}`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken } });
             loadHistory();
         }
 
         async function updateNotes(id) {
             const notes = document.getElementById(`notes-${id}`).value;
-            await fetch(`/history/${id}/notes?notes=${encodeURIComponent(notes)}`, { method: "PUT" });
+            await fetch(`/history/${id}/notes?notes=${encodeURIComponent(notes)}`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken } });
             loadHistory();
         }
 
         async function updateFollowUp(id) {
             const date = document.getElementById(`followup-${id}`).value;
-            await fetch(`/history/${id}/follow-up?follow_up_date=${encodeURIComponent(date)}`, { method: "PUT" });
+            await fetch(`/history/${id}/follow-up?follow_up_date=${encodeURIComponent(date)}`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken } });
             loadHistory();
         }
 
         async function clearFollowUp(id) {
-            await fetch(`/history/${id}/follow-up?follow_up_date=`, { method: "PUT" });
+            await fetch(`/history/${id}/follow-up?follow_up_date=`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken } });
             loadHistory();
         }
 
         async function deleteRecord(id) {
             if (!confirm("Delete this record?")) return;
-            await fetch(`/history/${id}`, { method: "DELETE" });
+            await fetch(`/history/${id}`, { method: "DELETE", headers: { "X-CSRF-Token": csrfToken } });
             loadHistory();
         }
 
@@ -389,11 +563,11 @@ def dashboard():
     </script>
 </body>
 </html>
-"""
+""", request)
 
 @app.get("/pipeline", response_class=HTMLResponse)
-def pipeline():
-    return """
+def pipeline(request: Request):
+    return _protected_page("""
 <!DOCTYPE html>
 <html>
 <head>
@@ -419,6 +593,13 @@ def pipeline():
     </div>
 
     <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+        function escapeHtml(value) {
+            const replacements = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"};
+            return String(value ?? "").replace(/[&<>"']/g, function (character) {
+                return replacements[character];
+            });
+        }
         let allData = [];
 
         async function loadPipeline() {
@@ -435,9 +616,9 @@ def pipeline():
 
             document.getElementById(elementId).innerHTML = items.length ? items.map(item => `
                 <div class="card">
-                    <p><strong>${item.customer_email || "No email"}</strong></p>
-                    <p>${item.customer_message}</p>
-                    <p>${item.category} | ${item.priority} | ${item.lead_score}/100</p>
+                    <p><strong>${escapeHtml(item.customer_email || "No email")}</strong></p>
+                    <p>${escapeHtml(item.customer_message)}</p>
+                    <p>${escapeHtml(item.category)} | ${escapeHtml(item.priority)} | ${escapeHtml(item.lead_score)}/100</p>
 
                     <select onchange="updateStatus(${item.id}, this.value)">
                         <option value="New" ${status === "New" ? "selected" : ""}>New</option>
@@ -449,7 +630,7 @@ def pipeline():
         }
 
         async function updateStatus(id, status) {
-            await fetch(`/history/${id}/status?new_status=${status}`, { method: "PUT" });
+            await fetch(`/history/${id}/status?new_status=${status}`, { method: "PUT", headers: { "X-CSRF-Token": csrfToken } });
             loadPipeline();
         }
 
@@ -457,4 +638,4 @@ def pipeline():
     </script>
 </body>
 </html>
-"""
+""", request)
