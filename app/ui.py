@@ -24,6 +24,7 @@ APP_THEME_CSS = """
   --radius: 18px;
 }
 * { box-sizing: border-box; }
+::selection { color: #17243b; background: rgba(201, 242, 126, .72); }
 html { min-width: 320px; background: var(--canvas); }
 body {
   margin: 0;
@@ -173,7 +174,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .stat-icon.orange { color: #b48236; background: #fff6e7; }
 .stat-icon.pink { color: #ba6c67; background: #fff0ef; }
 .stat-kicker { color: #a1aaba; font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.stat-value { display: block; margin-top: 11px; color: var(--ink); font-size: 27px; font-weight: 700; letter-spacing: -.05em; line-height: 1; }
+.stat-value { display: block; margin-top: 11px; color: var(--ink); font-size: 27px; font-weight: 700; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
 .stat-caption { display: block; margin-top: 7px; color: #8996a8; font-size: 9px; }
 .overview-grid { display: grid; grid-template-columns: minmax(220px, .72fr) minmax(0, 1.8fr); gap: 15px; margin-bottom: 16px; }
 .mix-panel { display: flex; align-items: center; gap: 20px; padding: 19px 20px; }
@@ -385,7 +386,11 @@ def build_protected_page(markup: str, path: str, csrf_token: str):
             f'<span class="nav-icon">{NAV_ICONS[href]}</span><span class="nav-label">{label}</span></a>'
         )
     csrf_meta = f'<meta name="csrf-token" content="{escape(csrf_token, quote=True)}">'
-    markup = markup.replace("<head>", "<head>\n" + csrf_meta, 1)
+    ui_meta = (
+        '<meta name="theme-color" content="#14243b">'
+        '<meta name="description" content="A private workspace to review customer messages and manage business prospects.">'
+    )
+    markup = markup.replace("<head>", "<head>\n" + csrf_meta + ui_meta, 1)
     markup = markup.replace("</head>", "<style>" + APP_THEME_CSS + "</style></head>", 1)
     shell = f"""
 <div class="app-shell">
@@ -398,7 +403,7 @@ def build_protected_page(markup: str, path: str, csrf_token: str):
     <nav class="sidebar-nav" aria-label="Primary navigation">{''.join(nav)}</nav>
     <div class="sidebar-spacer"></div>
     <div class="sidebar-status"><span class="status-pip"></span><div><strong>Private workspace</strong><span>Your records are protected by sign-in.</span></div></div>
-    <p class="sidebar-footnote">Single-owner workspace · Local data</p>
+    <p class="sidebar-footnote">Single-owner workspace · Private records</p>
   </aside>
   <main class="main-area">
     <header class="topbar">
@@ -430,6 +435,8 @@ def build_login_page(csrf_token: str, message: str = ""):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#14243b">
+  <meta name="description" content="A private workspace to review customer messages and manage business prospects.">
   <title>Sign in · Business AI</title>
   <style>
     :root {{ --canvas:#f4f6fa; --ink:#17243b; --muted:#8190a5; --lime:#c9f27e; }}
@@ -460,6 +467,7 @@ def build_login_page(csrf_token: str, message: str = ""):
     .login-label {{ display:block; margin:0 0 8px; color:#47566d; font-size:11px; font-weight:650; }}
     .login-password {{ width:100%; min-height:46px; padding:0 13px; border:1px solid #e1e7ef; border-radius:10px; color:var(--ink); background:#fbfcfe; }}
     .login-password:focus {{ border-color:#98a3ed; background:#fff; box-shadow:0 0 0 3px rgba(102,120,223,.10); outline:0; }}
+    .login-password:focus-visible,.login-submit:focus-visible {{ outline:3px solid rgba(102,120,223,.38); outline-offset:3px; }}
     .login-submit {{ display:flex; align-items:center; justify-content:center; width:100%; min-height:45px; margin-top:17px; border:0; border-radius:11px; color:#1c2c42; background:var(--lime); font-size:12px; font-weight:750; cursor:pointer; }}
     .login-submit:hover {{ background:#d5f69b; }}
     .login-protect {{ display:flex; align-items:center; gap:8px; margin-top:22px; color:#92a0b0; font-size:9px; }}
