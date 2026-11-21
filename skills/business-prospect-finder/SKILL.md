@@ -1,7 +1,7 @@
 ---
 name: Business Prospect Finder
-description: Finds businesses in user-selected industries and locations that fit an offer, verifies public business information, scores fit with evidence, and can save selected records to the authenticated FastAPI API.
-summary: Research source-backed business prospects with optional, user-approved Agensi data tools.
+description: Finds businesses in user-selected industries and locations, researches them with Agensi search, Hunter and Apollo tools, keeps sourced and enriched contact data separate, and can save selected records to the authenticated FastAPI API.
+summary: Find and enrich source-backed business prospects with user-approved Agensi tools.
 version: 1.0.0
 tags:
   - sales
@@ -36,24 +36,27 @@ Default batch size: 20, or the number the user requests. Ask for the offer, targ
 - Include a source URL for each business and a separate source for each contact detail.
 - Do not send email, submit contact forms, call businesses, or create outreach drafts unless separately requested.
 - Never run a paid Agensi tool until the user has approved the exact quote and amount. A positive account balance or tool default is not approval.
+- Use Hunter and Apollo enrichment only for business-relevant professional contact data. Keep provider-sourced contacts separate from information published by the business, and report the provider, verification status, confidence, and source when available.
+- Do not request, infer, or save personal email addresses, private mobile numbers, or home contact details. Do not use the tools for sensitive-attribute profiling, mass scraping, or unsolicited outreach.
 - Never ask the user to paste an API token into chat. Do not print, store, or include tokens in the result.
 - Do not save prospects to a database unless the user asks to save them.
 
 ## Workflow
 
 1. Confirm the user's offer, target industry or business type, geography, and requested count when they are missing. Limit one run to 20 businesses unless the user asks for a different count.
-2. Confirm a web search or browser tool is available in the agent, or that an Agensi search tool is enabled for this skill. If none is available, do not claim to search. Use Agensi MCP `find_tools` to inspect available search, business-email lookup, or verification tools when needed. Do not assume a provider or tool slug.
-3. Search using the requested business type or industry and geography. For any paid Agensi search or enrichment, identify the tool and parameters, call `quote_tool`, and show the user the exact tool, number of calls, total quoted cost, and expected fields. Wait for a clear yes before `run_tool`, even if the buyer's Agensi balance would allow an unprompted run. Use the approved quote ID and amount. Check quote status before retrying an uncertain or slow call so a quote is not charged twice.
-4. Verify each candidate using its own official website or another reliable primary source. Exclude intermediaries unless they lead to an official business page. If a paid lookup returns a contact not published by the business, label it as a third-party result and report its provider and verification status.
-5. Record supported facts: business name, industry, business type, website, city, region, country, postal code, business-published email and phone, and a professional contact only when the role and details are stated by a reliable source. Do not infer a contact or guess an email.
-6. Assess fit using the rubric in `references/scoring-rubric.md`. Support each reason with observable evidence relevant to the user's offer. Do not describe a website or business issue as a business failure or predict sales.
-7. Deduplicate by website domain and location. Keep the best-sourced record. Return no more than the requested count and clearly label missing contact fields.
-8. Show the list and sources for review. Only after the user asks to save, and only if an authenticated HTTP client is already configured, send selected records to the API using the contract in `references/api-integration.md`. Use a bearer token from the client's private secret store. Save only contact details confirmed by an official business source; do not access the database file directly.
-9. Report the research date, number of businesses found, how many had business-published email or phone details, third-party lookup results and verification status, paid calls and quoted costs, duplicates, and whether the API confirmed saved records.
+2. Confirm a web search, browser, or Agensi search tool is available. Use local-business search for location-based sectors; use Apollo company search for B2B account discovery when relevant. If no search capability is available, do not claim to search. Agensi tool names and prices can change: inspect the connected tool cards or use `find_tools`; do not assume a tool slug.
+3. Search using the requested business type or industry and geography. Start with public sources and free search tools where available. For every paid search or enrichment, identify the exact tool, parameters, number of calls/records, quoted total, and expected fields. Call `quote_tool` and wait for the user's explicit approval before `run_tool`, even if the balance would allow an unprompted run. Use the approved quote ID and price. Check quote status before retrying an uncertain call.
+4. For selected businesses, use Hunter's company-domain lookup before domain search or email finder when needed. Hunter domain-search results can have missing verification status or low confidence; do not call them verified unless the returned status says so. Email Finder needs a named person and company domain. Use Hunter email verification when a contact's status is missing, unclear, or the user requests verification. Apollo people search is for finding matching decision-makers; it does not itself provide full contact details, so use person enrichment only for selected matches and only after the paid quote is approved. Avoid repeated Apollo/Hunter lookups for the same person unless the first result is missing or the user requests a comparison.
+5. Verify each candidate using its own official website or another reliable primary source. Exclude intermediaries unless they lead to an official business page. Provider-enriched details are third-party results, not business-published facts. Keep them separate and report the provider, returned verification status, confidence, and lookup date/source when available.
+6. Record supported facts: business name, industry, business type, website, city, region, country, postal code, business-published email and phone, and a professional contact only when the role and details are stated by a reliable source. Store Hunter/Apollo results only in the dedicated enrichment fields. Never infer a contact or guess an email.
+7. Assess fit using the rubric in `references/scoring-rubric.md`. Support each reason with observable evidence relevant to the user's offer. Do not describe a website or business issue as a business failure or predict sales.
+8. Deduplicate by website domain and location. Keep the best-sourced record. Return no more than the requested count and clearly label missing contact fields.
+9. Show the list and sources for review. Only after the user asks to save, and only if an authenticated HTTP client is already configured, send new selected records to `POST /businesses/batch`. For a previously saved business, use `PATCH /businesses/{id}/enrichment` only when asked to save/update its enrichment. Use the bearer token from the client's private secret store. Keep business-published and provider-enriched fields separate; never access the database file directly.
+10. Report the research date, businesses found, how many had business-published email or phone details, Hunter/Apollo calls and returned verification status, paid calls and quoted costs, duplicates, and whether the API confirmed saved records.
 
 ## Output fields
 
-For each business return: business name, industry, business type, city, region, country, postal code, website, business-published email and phone, professional contact and role when supported, fit score out of 100, concise evidence-based fit reason, source URL, contact source or provider, verification status, and date checked. Mark unavailable contact details as "not found publicly"; never fill them with guesses. Show any third-party lookup result in a separate, clearly labeled field.
+For each business return: business name, industry, business type, city, region, country, postal code, website, business-published email and phone, professional contact and role when supported, fit score out of 100, concise evidence-based fit reason, source URL, and date checked. Show Hunter/Apollo-enriched email, phone, contact, provider, confidence, verification status, and source separately from published contact information. Mark unavailable contact details as "not found publicly"; never fill them with guesses.
 
 ## Tool and API availability
 

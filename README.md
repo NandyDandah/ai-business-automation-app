@@ -12,7 +12,8 @@ A Python/FastAPI web app that helps small businesses automate customer message h
 - Follow-up date tracking
 - Notes per lead
 - CSV export
-- Industry-neutral business prospect records with source-backed contact details
+- Industry-neutral business prospect records with a protected browser database
+- Optional Hunter and Apollo enrichment with source, provider, status, and confidence kept separate from business-published details
 - SQLite for local development and PostgreSQL for hosted use
 
 ## Tech Stack
@@ -49,7 +50,7 @@ The legacy `uvicorn main:app` entry point also loads this authenticated applicat
 
 The app reads its database connection from `DATABASE_URL`. Local development defaults to SQLite. On Render, set this environment variable to the Postgres database's **internal URL** in the web service's private environment settings, and place the database and web service in the same region. Never commit the connection URL or paste it into a public file. The requirements include the Psycopg driver for PostgreSQL.
 
-At startup, the app creates missing tables and adds the generic industry, business type, region, and country fields to an existing prospects table. This migration preserves existing records. It does not seed fabricated businesses or delete an existing database.
+At startup, the app creates missing tables and adds generic industry, business type, region, country, and provider-enrichment fields to an existing prospects table. This migration preserves existing records. It does not seed fabricated businesses or delete an existing database.
 
 ## Agensi skills
 
@@ -58,14 +59,15 @@ This repository contains two separate skills:
 - skills/inbound-lead-triage: reviews an enquiry the user provides and drafts an unsent reply.
 - skills/business-prospect-finder: researches businesses in user-selected industries and locations, checks public business sources, and can save selected records to this app's authenticated API.
 
-The prospect finder uses Agensi MCP tools at run time. It starts with public search and requires the user's explicit approval of the exact price before any paid email lookup or enrichment. It never sends outreach. Agensi can use up to 10 listed tools per skill; choose search, email lookup, and verification tools in Creator Studio after reviewing their current names and prices. Agensi delivers skills through its MCP server and does not host this app's FastAPI backend.
+The prospect finder uses Agensi MCP tools at run time. It can use Google Maps or web search for business discovery, Apollo for company and decision-maker search/enrichment, and Hunter for domain lookup, work-email finding, and verification. The user's agent calls these tools through Agensi; the FastAPI server does not need provider API keys. Agensi allows up to 10 tool cards per skill, which must be selected in Creator Studio using the live catalog. It starts with public/source checks and requires explicit approval of the exact quote before any paid call. It never sends outreach. Agensi delivers skills through its MCP server and does not host this app's FastAPI backend. See `skills/business-prospect-finder/references/agensi-tool-setup.md`.
 
 ## Business API
 
 - POST /businesses/batch saves 1 to 50 source-backed business records.
 - GET /businesses lists saved records; DELETE /businesses/{id} deletes one.
+- PATCH /businesses/{id}/enrichment updates Hunter/Apollo fields on an existing record without overwriting business-published details.
 - These routes require the same bearer authentication as the rest of the API.
 
-The API supports `business_name`, industry, business type, country, region, city, postal code, and business-published contact fields. The old `/prospects` routes and clinic-specific request keys remain as aliases for compatibility. The skill only saves records when asked and when the caller already has a private API token configured. Use localhost only for an agent running on the same computer. A remote agent needs a privately accessible HTTPS API; never expose a database file.
+The API supports generic business/location fields, business-published contact details, and separate Hunter/Apollo enrichment fields. The old `/prospects` routes and clinic-specific request keys remain as aliases for compatibility. The protected `/prospect-database` page shows those fields separately. The skill only saves records when asked and when the caller already has a private API token configured. Use localhost only for an agent running on the same computer. A remote agent needs a privately accessible HTTPS API; never expose a database file.
 
 

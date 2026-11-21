@@ -68,6 +68,16 @@ class Prospect(Base):
     phone = synonym("business_phone")
     contact_name = Column(String, default="")
     contact_role = Column(String, default="")
+    # Keep provider-enriched contact data distinct from information published
+    # by the business itself, and retain the lookup provenance/status.
+    enriched_email = Column(String, default="")
+    enriched_phone = Column(String, default="")
+    enriched_contact_name = Column(String, default="")
+    enriched_contact_role = Column(String, default="")
+    enrichment_provider = Column(String(80), default="")
+    enrichment_status = Column(String(80), default="")
+    enrichment_confidence = Column(String(80), default="")
+    enrichment_source_url = Column(String(1000), default="")
     source_url = Column(String, nullable=False)
     contact_source_url = Column(String, default="")
     fit_score = Column(Integer, default=0)
@@ -91,6 +101,14 @@ def create_tables():
         "country": "VARCHAR(120) NOT NULL DEFAULT ''",
         "industry": "VARCHAR(120) NOT NULL DEFAULT ''",
         "business_type": "VARCHAR(120) NOT NULL DEFAULT ''",
+        "enriched_email": "VARCHAR(320) NOT NULL DEFAULT ''",
+        "enriched_phone": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "enriched_contact_name": "VARCHAR(160) NOT NULL DEFAULT ''",
+        "enriched_contact_role": "VARCHAR(160) NOT NULL DEFAULT ''",
+        "enrichment_provider": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "enrichment_status": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "enrichment_confidence": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "enrichment_source_url": "VARCHAR(1000) NOT NULL DEFAULT ''",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():

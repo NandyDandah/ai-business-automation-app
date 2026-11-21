@@ -5,7 +5,7 @@ import time
 from collections import defaultdict, deque
 from html import escape as escape_html
 from threading import Lock
-from typing import Literal
+from typing import Literal, Optional
 from urllib.parse import urlparse
 from io import StringIO
 
@@ -24,7 +24,10 @@ from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
     get_session_csrf_token, load_auth_config, verify_api_token, verify_login_csrf, verify_password,
 )
-from app.ui import DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE, build_login_page, build_protected_page
+from app.ui import (
+    BUSINESS_DATABASE_PAGE, DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE,
+    build_login_page, build_protected_page,
+)
 
 AUTH_CONFIG = load_auth_config()
 
@@ -171,6 +174,14 @@ class ProspectInput(BaseModel):
     business_phone: str = Field(default="", max_length=80)
     contact_name: str = Field(default="", max_length=160)
     contact_role: str = Field(default="", max_length=160)
+    enriched_email: str = Field(default="", max_length=320)
+    enriched_phone: str = Field(default="", max_length=80)
+    enriched_contact_name: str = Field(default="", max_length=160)
+    enriched_contact_role: str = Field(default="", max_length=160)
+    enrichment_provider: str = Field(default="", max_length=80)
+    enrichment_status: str = Field(default="", max_length=80)
+    enrichment_confidence: str = Field(default="", max_length=80)
+    enrichment_source_url: str = Field(default="", max_length=1000)
     source_url: str = Field(min_length=8, max_length=1000)
     contact_source_url: str = Field(default="", max_length=1000)
     fit_score: int = Field(default=0, ge=0, le=100)
@@ -221,6 +232,17 @@ class ProspectBatch(BaseModel):
         if len(values["businesses"]) > 50:
             raise ValueError("businesses may contain at most 50 records")
         return values
+
+
+class BusinessEnrichmentInput(BaseModel):
+    enrichment_provider: str = Field(min_length=1, max_length=80)
+    enriched_email: Optional[str] = Field(default=None, max_length=320)
+    enriched_phone: Optional[str] = Field(default=None, max_length=80)
+    enriched_contact_name: Optional[str] = Field(default=None, max_length=160)
+    enriched_contact_role: Optional[str] = Field(default=None, max_length=160)
+    enrichment_status: Optional[str] = Field(default=None, max_length=80)
+    enrichment_confidence: Optional[str] = Field(default=None, max_length=80)
+    enrichment_source_url: Optional[str] = Field(default=None, max_length=1000)
 
 
 def get_db():
@@ -363,6 +385,10 @@ def dashboard(request: Request):
 def pipeline(request: Request):
     return _protected_page(PIPELINE_PAGE, request)
 
+@app.get("/prospect-database", response_class=HTMLResponse)
+def prospect_database(request: Request):
+    return _protected_page(BUSINESS_DATABASE_PAGE, request)
+
 def _prospect_fingerprint(item: ProspectInput) -> str:
     website = item.website.strip()
     host = urlparse(website if "://" in website else "https://" + website).hostname or ""
@@ -392,6 +418,14 @@ def _prospect_dict(record: Prospect):
         "business_phone": record.business_phone,
         "contact_name": record.contact_name,
         "contact_role": record.contact_role,
+        "enriched_email": record.enriched_email or "",
+        "enriched_phone": record.enriched_phone or "",
+        "enriched_contact_name": record.enriched_contact_name or "",
+        "enriched_contact_role": record.enriched_contact_role or "",
+        "enrichment_provider": record.enrichment_provider or "",
+        "enrichment_status": record.enrichment_status or "",
+        "enrichment_confidence": record.enrichment_confidence or "",
+        "enrichment_source_url": record.enrichment_source_url or "",
         "source_url": record.source_url,
         "contact_source_url": record.contact_source_url,
         "fit_score": record.fit_score,
@@ -431,6 +465,14 @@ def save_businesses(payload: ProspectBatch, db: Session = Depends(get_db)):
             business_phone=item.business_phone.strip(),
             contact_name=item.contact_name.strip(),
             contact_role=item.contact_role.strip(),
+            enriched_email=item.enriched_email.strip(),
+            enriched_phone=item.enriched_phone.strip(),
+            enriched_contact_name=item.enriched_contact_name.strip(),
+            enriched_contact_role=item.enriched_contact_role.strip(),
+            enrichment_provider=item.enrichment_provider.strip(),
+            enrichment_status=item.enrichment_status.strip(),
+            enrichment_confidence=item.enrichment_confidence.strip(),
+            enrichment_source_url=item.enrichment_source_url.strip(),
             source_url=item.source_url.strip(),
             contact_source_url=item.contact_source_url.strip(),
             fit_score=item.fit_score,
@@ -460,5 +502,21 @@ def delete_business(record_id: int, db: Session = Depends(get_db)):
     db.delete(record)
     db.commit()
     return {"deleted": True}
+
+
+@app.patch("/businesses/{record_id}/enrichment")
+@app.patch("/prospects/{record_id}/enrichment")
+def update_business_enrichment(
+    record_id: int,
+    payload: BusinessEnrichmentInput,
+    db: Session = Depends(get_db),
+):
+    record = db.query(Prospect).filter(Prospect.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Business not found")
+    for field, value in payload.dict(exclude_unset=True).items():
+        setattr(record, field, value.strip() if value is not None else "")
+    db.commit()
+    return {"updated": True, "id": record.id, "enrichment_provider": record.enrichment_provider}
 
 

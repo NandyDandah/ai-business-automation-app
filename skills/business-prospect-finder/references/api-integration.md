@@ -14,9 +14,11 @@ Keep the token in the agent or HTTP client's secret store. Never place it in a s
 
 ## Batch create
 
-POST to `/businesses/batch` with a JSON body containing one to 50 business records. Each record requires `business_name` and `source_url`. Include only contact details supported by an official business source.
+POST to `/businesses/batch` with a JSON body containing one to 50 business records. Each record requires `business_name` and `source_url`. Use business-published fields only for details confirmed by an official business source. Store provider results separately.
 
-Fields: `business_name`, `industry`, `business_type`, `website`, `city`, `region`, `country`, `postal_code`, `business_email`, `business_phone`, `contact_name`, `contact_role`, `source_url`, `contact_source_url`, `fit_score`, and `fit_summary`.
+Business and business-published fields: `business_name`, `industry`, `business_type`, `website`, `city`, `region`, `country`, `postal_code`, `business_email`, `business_phone`, `contact_name`, `contact_role`, `source_url`, `contact_source_url`, `fit_score`, and `fit_summary`.
+
+Optional third-party enrichment fields: `enriched_email`, `enriched_phone`, `enriched_contact_name`, `enriched_contact_role`, `enrichment_provider`, `enrichment_status`, `enrichment_confidence`, and `enrichment_source_url`. Use these only for Hunter, Apollo, or other provider results. Never copy provider results into the business-published fields unless the official business source independently confirms them. Leave unavailable values blank and keep the provider, returned verification status, confidence, and source together.
 
 A successful response returns `created`, `duplicates`, and `ids`. Saving is idempotent for the same website and location. The app rejects a batch outside the one-to-50 range and bounds every text field.
 
@@ -25,9 +27,12 @@ The legacy `/prospects` routes and old field names remain available for existing
 ## Read and delete
 
 - `GET /businesses` lists the latest records (100 by default, up to 500 with `limit`).
+- `PATCH /businesses/{id}/enrichment` updates third-party enrichment for an existing business. Include `enrichment_provider`; optional fields are `enriched_email`, `enriched_phone`, `enriched_contact_name`, `enriched_contact_role`, `enrichment_status`, `enrichment_confidence`, and `enrichment_source_url`. This route does not modify business-published contact fields.
 - `DELETE /businesses/{id}` removes one business record.
 
 These operations require bearer authentication.
+
+The authenticated browser page `/prospect-database` shows saved records with business-published details and third-party enrichment in separate panels. It reads the same protected `/businesses` endpoint.
 
 ## Connectivity
 
