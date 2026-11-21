@@ -22,7 +22,7 @@ os.environ["APP_PASSWORD_HASH"] = hash_password(PASSWORD)
 os.environ["APP_API_TOKEN_HASH"] = hash_api_token(TOKEN)
 
 from fastapi.testclient import TestClient
-from app.database import Automation, SessionLocal
+from app.database import Automation, Prospect, SessionLocal
 from app.main import app, AUTH_CONFIG
 from app.security import get_session_csrf_token
 
@@ -42,6 +42,7 @@ def session_csrf(client):
 class AuthenticationTests(unittest.TestCase):
     def setUp(self):
         with SessionLocal() as db:
+            db.query(Prospect).delete()
             db.query(Automation).delete()
             db.commit()
         self.client = TestClient(app)
@@ -108,6 +109,48 @@ class AuthenticationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 load_auth_config()
 
+
+    def test_prospect_api_requires_auth_deduplicates_and_returns_saved_leads(self):
+        payload = {
+            "prospects": [{
+                "clinic_name": "North Demo Dental",
+                "website": "https://north-demo-dental.invalid",
+                "town": "Leeds",
+                "postcode": "LS1 1AA",
+                "public_email": "hello@north-demo-dental.invalid",
+                "phone": "+44 113 555 0100",
+                "source_url": "https://north-demo-dental.invalid/about",
+                "contact_source_url": "https://north-demo-dental.invalid/contact",
+                "fit_score": 82,
+                "fit_summary": "Synthetic test prospect; no real clinic data."
+            }]
+        }
+        denied = self.client.post("/prospects/batch", json=payload)
+        self.assertEqual(denied.status_code, 401)
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        created = self.client.post("/prospects/batch", json=payload, headers=headers)
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["created"], 1)
+        repeated = self.client.post("/prospects/batch", json=payload, headers=headers)
+        self.assertEqual(repeated.json()["created"], 0)
+        self.assertEqual(repeated.json()["duplicates"], 1)
+        saved = self.client.get("/prospects", headers=headers)
+        self.assertEqual(len(saved.json()), 1)
+        self.assertEqual(saved.json()[0]["clinic_name"], "North Demo Dental")
+        self.assertEqual(saved.json()[0]["public_email"], "hello@north-demo-dental.invalid")
+        invalid = self.client.post("/prospects/batch", json={"prospects": [{"clinic_name": "Missing source"}]}, headers=headers)
+        self.assertEqual(invalid.status_code, 422)
+
+    def test_clinic_skill_documents_tool_costs_and_safe_api_use(self):
+        root = Path(__file__).resolve().parents[1] / "skills" / "clinic-prospect-finder"
+        skill = (root / "SKILL.md").read_text(encoding="utf-8")
+        api = (root / "references" / "api-integration.md").read_text(encoding="utf-8")
+        self.assertTrue(skill.startswith("---\nname: UK Dental Clinic Prospect Finder\n"))
+        self.assertIn("quote_tool", skill)
+        self.assertIn("approved the exact quote and amount", skill)
+        self.assertIn("POST to /prospects/batch", api)
+        self.assertIn("Authorization: Bearer", api)
+
     def test_sensitive_html_is_not_cached_and_has_csrf(self):
         login(self.client)
         response = self.client.get("/")
@@ -121,5 +164,8 @@ class AuthenticationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
 
 

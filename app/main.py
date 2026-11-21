@@ -6,18 +6,19 @@ from collections import defaultdict, deque
 from html import escape as escape_html
 from threading import Lock
 from typing import Literal
+from urllib.parse import urlparse
 from io import StringIO
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 load_dotenv()
 
-from app.database import SessionLocal, Automation, create_tables
+from app.database import SessionLocal, Automation, Prospect, create_tables
 from app.ai_service import analyse_business_message
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
@@ -175,6 +176,25 @@ create_tables()
 class AutomationRequest(BaseModel):
     message: str
     email: str = ""
+
+class ProspectInput(BaseModel):
+    clinic_name: str = Field(min_length=1, max_length=200)
+    website: str = Field(default="", max_length=500)
+    town: str = Field(default="", max_length=120)
+    postcode: str = Field(default="", max_length=24)
+    public_email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=80)
+    contact_name: str = Field(default="", max_length=160)
+    contact_role: str = Field(default="", max_length=160)
+    source_url: str = Field(min_length=8, max_length=1000)
+    contact_source_url: str = Field(default="", max_length=1000)
+    fit_score: int = Field(default=0, ge=0, le=100)
+    fit_summary: str = Field(default="", max_length=2000)
+
+
+class ProspectBatch(BaseModel):
+    prospects: list[ProspectInput] = Field(min_length=1, max_length=50)
+
 
 def get_db():
     db = SessionLocal()
@@ -639,3 +659,83 @@ def pipeline(request: Request):
 </body>
 </html>
 """, request)
+
+
+def _prospect_fingerprint(item: ProspectInput) -> str:
+    website = item.website.strip()
+    host = urlparse(website if "://" in website else "https://" + website).hostname or ""
+    host = host.lower().removeprefix("www.")
+    location = " ".join((item.postcode or item.town).upper().split())
+    if not host:
+        host = item.clinic_name.strip().lower()
+    return f"{host}|{location}"
+
+
+def _prospect_dict(record: Prospect):
+    return {
+        "id": record.id,
+        "clinic_name": record.clinic_name,
+        "website": record.website,
+        "town": record.town,
+        "postcode": record.postcode,
+        "public_email": record.public_email,
+        "phone": record.phone,
+        "contact_name": record.contact_name,
+        "contact_role": record.contact_role,
+        "source_url": record.source_url,
+        "contact_source_url": record.contact_source_url,
+        "fit_score": record.fit_score,
+        "fit_summary": record.fit_summary,
+        "status": record.status,
+        "created_at": record.created_at.isoformat() if record.created_at else "",
+    }
+
+
+@app.post("/prospects/batch")
+def save_prospects(payload: ProspectBatch, db: Session = Depends(get_db)):
+    existing = {row[0] for row in db.query(Prospect.fingerprint).all()}
+    created = []
+    duplicates = 0
+    for item in payload.prospects:
+        fingerprint = _prospect_fingerprint(item)
+        if fingerprint in existing:
+            duplicates += 1
+            continue
+        record = Prospect(
+            clinic_name=item.clinic_name.strip(),
+            website=item.website.strip(),
+            town=item.town.strip(),
+            postcode=item.postcode.strip(),
+            public_email=item.public_email.strip(),
+            phone=item.phone.strip(),
+            contact_name=item.contact_name.strip(),
+            contact_role=item.contact_role.strip(),
+            source_url=item.source_url.strip(),
+            contact_source_url=item.contact_source_url.strip(),
+            fit_score=item.fit_score,
+            fit_summary=item.fit_summary.strip(),
+            fingerprint=fingerprint,
+        )
+        db.add(record)
+        existing.add(fingerprint)
+        created.append(record)
+    db.commit()
+    return {"created": len(created), "duplicates": duplicates, "ids": [record.id for record in created]}
+
+
+@app.get("/prospects")
+def list_prospects(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)):
+    records = db.query(Prospect).order_by(Prospect.id.desc()).limit(limit).all()
+    return [_prospect_dict(record) for record in records]
+
+
+@app.delete("/prospects/{prospect_id}")
+def delete_prospect(prospect_id: int, db: Session = Depends(get_db)):
+    record = db.query(Prospect).filter(Prospect.id == prospect_id).first()
+    if not record:
+        return {"deleted": False, "message": "Prospect not found"}
+    db.delete(record)
+    db.commit()
+    return {"deleted": True}
+
+

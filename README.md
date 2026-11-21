@@ -41,14 +41,21 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Agensi agent skill
+## Agensi skills
 
-This repository also includes a standalone skill for triaging inbound enquiries in an AI agent:
+This repository contains two separate skills:
 
-- `skills/inbound-lead-triage/SKILL.md` — the workflow, output format, and safety boundaries.
-- `skills/inbound-lead-triage/references/scoring-rubric.md` — an explainable scoring rubric.
+- skills/inbound-lead-triage: reviews an enquiry the user provides and drafts an unsent reply.
+- skills/clinic-prospect-finder: researches public UK dental clinic information for web-design prospects, checks public contact sources, and can save selected records to this app's authenticated API.
 
-The skill works from information the user provides. It returns a triage summary and an unsent reply draft. It does not connect to this FastAPI app, save or change CRM records, discover prospects, verify contacts, or send messages. The skill does not require a hosted backend or API keys.
+The prospect finder uses Agensi MCP tools at run time. It starts with public search and requires the user's explicit approval of the exact price before any paid email lookup or enrichment. It never sends outreach. Agensi can use up to 10 listed tools per skill; choose search, email lookup, and verification tools in Creator Studio after reviewing their current names and prices. Agensi delivers skills through its MCP server and does not host this app's FastAPI backend.
 
-To list it, package the files under `skills/inbound-lead-triage/` in a ZIP and submit it through Agensi Creator Studio for review. The listing is not live until Agensi approves it. If live data tools are added later, their use and separate buyer charges should be described in the listing.
+## Prospect API
+
+- POST /prospects/batch saves 1 to 50 source-backed records.
+- GET /prospects lists saved records; DELETE /prospects/{id} deletes one.
+- These routes require the same bearer authentication as the rest of the API.
+
+The skill only saves records when asked and when the caller already has a private API token configured. Use localhost only for an agent running on the same computer. A remote agent needs a privately accessible HTTPS API; never expose the SQLite database file.
+
 
