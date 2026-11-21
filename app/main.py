@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 from sqlalchemy.orm import Session
 
 load_dotenv()
@@ -27,9 +27,6 @@ from app.security import (
 from app.ui import DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE, build_login_page, build_protected_page
 
 AUTH_CONFIG = load_auth_config()
-
-from app.database import SessionLocal, Automation, create_tables
-from app.ai_service import analyse_business_message
 
 app = FastAPI(title="AI Business Automation App")
 
@@ -162,22 +159,68 @@ class AutomationRequest(BaseModel):
     email: str = ""
 
 class ProspectInput(BaseModel):
-    clinic_name: str = Field(min_length=1, max_length=200)
+    business_name: str = Field(default="", max_length=200)
+    industry: str = Field(default="", max_length=120)
+    business_type: str = Field(default="", max_length=120)
     website: str = Field(default="", max_length=500)
-    town: str = Field(default="", max_length=120)
-    postcode: str = Field(default="", max_length=24)
-    public_email: str = Field(default="", max_length=320)
-    phone: str = Field(default="", max_length=80)
+    city: str = Field(default="", max_length=120)
+    region: str = Field(default="", max_length=120)
+    country: str = Field(default="", max_length=120)
+    postal_code: str = Field(default="", max_length=32)
+    business_email: str = Field(default="", max_length=320)
+    business_phone: str = Field(default="", max_length=80)
     contact_name: str = Field(default="", max_length=160)
     contact_role: str = Field(default="", max_length=160)
     source_url: str = Field(min_length=8, max_length=1000)
     contact_source_url: str = Field(default="", max_length=1000)
     fit_score: int = Field(default=0, ge=0, le=100)
     fit_summary: str = Field(default="", max_length=2000)
+    # Backward-compatible names accepted from the original clinic API.
+    clinic_name: str = Field(default="", max_length=200)
+    town: str = Field(default="", max_length=120)
+    postcode: str = Field(default="", max_length=32)
+    public_email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=80)
+
+    @root_validator(pre=True)
+    def copy_legacy_business_fields(cls, values):
+        values = dict(values or {})
+        for current, legacy in (
+            ("business_name", "clinic_name"),
+            ("city", "town"),
+            ("postal_code", "postcode"),
+            ("business_email", "public_email"),
+            ("business_phone", "phone"),
+        ):
+            if not values.get(current) and values.get(legacy):
+                values[current] = values[legacy]
+        return values
+
+    @root_validator(skip_on_failure=True)
+    def require_business_name(cls, values):
+        if not values.get("business_name", "").strip():
+            raise ValueError("business_name is required")
+        return values
 
 
 class ProspectBatch(BaseModel):
-    prospects: list[ProspectInput] = Field(min_length=1, max_length=50)
+    businesses: list[ProspectInput] = Field(default_factory=list, max_length=50)
+    prospects: list[ProspectInput] = Field(default_factory=list, max_length=50)
+
+    @root_validator(pre=True)
+    def copy_legacy_batch_field(cls, values):
+        values = dict(values or {})
+        if not values.get("businesses") and values.get("prospects"):
+            values["businesses"] = values["prospects"]
+        return values
+
+    @root_validator(skip_on_failure=True)
+    def require_records(cls, values):
+        if not values.get("businesses"):
+            raise ValueError("businesses must contain between 1 and 50 records")
+        if len(values["businesses"]) > 50:
+            raise ValueError("businesses may contain at most 50 records")
+        return values
 
 
 def get_db():
@@ -324,21 +367,29 @@ def _prospect_fingerprint(item: ProspectInput) -> str:
     website = item.website.strip()
     host = urlparse(website if "://" in website else "https://" + website).hostname or ""
     host = host.lower().removeprefix("www.")
-    location = " ".join((item.postcode or item.town).upper().split())
+    location = " ".join(
+        " ".join((item.country, item.region, item.postal_code or item.city))
+        .upper()
+        .split()
+    )
     if not host:
-        host = item.clinic_name.strip().lower()
+        host = item.business_name.strip().lower()
     return f"{host}|{location}"
 
 
 def _prospect_dict(record: Prospect):
     return {
         "id": record.id,
-        "clinic_name": record.clinic_name,
+        "business_name": record.business_name,
+        "industry": record.industry or "",
+        "business_type": record.business_type or "",
         "website": record.website,
-        "town": record.town,
-        "postcode": record.postcode,
-        "public_email": record.public_email,
-        "phone": record.phone,
+        "city": record.city,
+        "region": record.region or "",
+        "country": record.country or "",
+        "postal_code": record.postal_code,
+        "business_email": record.business_email,
+        "business_phone": record.business_phone,
         "contact_name": record.contact_name,
         "contact_role": record.contact_role,
         "source_url": record.source_url,
@@ -347,26 +398,37 @@ def _prospect_dict(record: Prospect):
         "fit_summary": record.fit_summary,
         "status": record.status,
         "created_at": record.created_at.isoformat() if record.created_at else "",
+        # Keep old response keys so existing agents and integrations still work.
+        "clinic_name": record.business_name,
+        "town": record.city,
+        "postcode": record.postal_code,
+        "public_email": record.business_email,
+        "phone": record.business_phone,
     }
 
 
+@app.post("/businesses/batch")
 @app.post("/prospects/batch")
-def save_prospects(payload: ProspectBatch, db: Session = Depends(get_db)):
+def save_businesses(payload: ProspectBatch, db: Session = Depends(get_db)):
     existing = {row[0] for row in db.query(Prospect.fingerprint).all()}
     created = []
     duplicates = 0
-    for item in payload.prospects:
+    for item in payload.businesses:
         fingerprint = _prospect_fingerprint(item)
         if fingerprint in existing:
             duplicates += 1
             continue
         record = Prospect(
-            clinic_name=item.clinic_name.strip(),
+            business_name=item.business_name.strip(),
+            industry=item.industry.strip(),
+            business_type=item.business_type.strip(),
             website=item.website.strip(),
-            town=item.town.strip(),
-            postcode=item.postcode.strip(),
-            public_email=item.public_email.strip(),
-            phone=item.phone.strip(),
+            city=item.city.strip(),
+            region=item.region.strip(),
+            country=item.country.strip(),
+            postal_code=item.postal_code.strip(),
+            business_email=item.business_email.strip(),
+            business_phone=item.business_phone.strip(),
             contact_name=item.contact_name.strip(),
             contact_role=item.contact_role.strip(),
             source_url=item.source_url.strip(),
@@ -382,15 +444,17 @@ def save_prospects(payload: ProspectBatch, db: Session = Depends(get_db)):
     return {"created": len(created), "duplicates": duplicates, "ids": [record.id for record in created]}
 
 
+@app.get("/businesses")
 @app.get("/prospects")
-def list_prospects(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)):
+def list_businesses(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)):
     records = db.query(Prospect).order_by(Prospect.id.desc()).limit(limit).all()
     return [_prospect_dict(record) for record in records]
 
 
-@app.delete("/prospects/{prospect_id}")
-def delete_prospect(prospect_id: int, db: Session = Depends(get_db)):
-    record = db.query(Prospect).filter(Prospect.id == prospect_id).first()
+@app.delete("/businesses/{record_id}")
+@app.delete("/prospects/{record_id}")
+def delete_business(record_id: int, db: Session = Depends(get_db)):
+    record = db.query(Prospect).filter(Prospect.id == record_id).first()
     if not record:
         return {"deleted": False, "message": "Prospect not found"}
     db.delete(record)

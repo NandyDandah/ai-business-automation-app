@@ -4,3 +4,5 @@ sqlalchemy
 pydantic
 python-dotenv
 python-multipart
+psycopg[binary]>=3.2,<4
+
