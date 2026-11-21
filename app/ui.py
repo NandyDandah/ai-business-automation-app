@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 20166)
-Total output lines: 1043
-
 """Presentation layer for the authenticated automation workspace."""
 
 from html import escape
@@ -277,7 +274,473 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .pipeline-empty { padding: 22px 10px; color: #a0aaba; font-size: 9px; text-align: center; }
 .login-page { min-height: 100vh; padding: clamp(16px,4vw,40px); background: radial-gradient(circle at 12% 13%, rgba(193,231,158,.32), transparent 27%), radial-gradient(circle at 92% 85%, rgba(116,136,226,.13), transparent 26%), #f4f6fa; font-family: Inter, "Segoe UI Variable", Aptos, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .login-shell { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(360px,.95fr); overflow: hidden; width: min(100%,1040px); min-height: min(700px,calc(100vh - 80px)); margin: 0 auto; border: 1px solid #e7ebf0; border-radius: 24px; background: #fff; box-shadow: 0 28px 80px rgba(23,39,62,.12); }
-.login-showcase { position: relative; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; pad…8166 tokens truncated…replace(/[&<>"']/g, function (character) { return replacements[character]; });
+.login-showcase { position: relative; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; padding: clamp(28px,5vw,55px); color: #f3f6fb; background: radial-gradient(circle at 87% 18%, rgba(105,135,192,.28), transparent 27%), linear-gradient(145deg,#14243b,#213652 75%,#304965); }
+.login-showcase:before, .login-showcase:after { position: absolute; border: 1px solid rgba(255,255,255,.09); border-radius: 50%; content: ""; }
+.login-showcase:before { top: 22%; right: -120px; width: 380px; height: 380px; }
+.login-showcase:after { top: 29%; right: -60px; width: 260px; height: 260px; }
+.login-brand { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; }
+.login-brand-name { color: #fff; font-size: 12px; font-weight: 750; letter-spacing: .12em; }
+.login-brand-sub { display: block; margin-top: 2px; color: #9baec5; font-size: 9px; letter-spacing: .04em; }
+.login-visual { position: relative; z-index: 1; display: grid; place-items: center; min-height: 260px; }
+.login-visual svg { width: min(100%,390px); }
+.login-showcase-copy { position: relative; z-index: 1; max-width: 430px; }
+.login-showcase-copy .eyebrow { color: #b5c6d9; }
+.login-showcase-copy h2 { margin: 0; color: #fff; font-size: clamp(24px,3vw,36px); font-weight: 650; letter-spacing: -.045em; line-height: 1.2; }
+.login-showcase-copy p { max-width: 390px; margin: 12px 0 0; color: #afbed1; font-size: 11px; line-height: 1.8; }
+.login-form-panel { display: flex; flex-direction: column; justify-content: center; padding: clamp(28px,5vw,60px); }
+.login-form-panel h1 { margin: 0; color: var(--ink); font-size: 29px; font-weight: 700; letter-spacing: -.045em; }
+.login-form-panel > p { margin: 9px 0 27px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.login-form-panel .input-label { margin-bottom: 8px; }
+.login-form-panel .text-input { min-height: 46px; }
+.login-submit { width: 100%; margin-top: 17px; }
+.login-error { margin: 0 0 16px; padding: 10px 12px; border: 1px solid #f0d2cc; border-radius: 9px; color: #9a4d45; background: #fff6f4; font-size: 10px; }
+.login-protect { display: flex; align-items: center; gap: 8px; margin-top: 22px; color: #92a0b0; font-size: 9px; }
+.login-protect svg { width: 14px; height: 14px; color: #6fa16f; }
+@media (max-width: 1120px) {
+  .app-shell { grid-template-columns: 216px minmax(0,1fr); }
+  .overview-grid { grid-template-columns: 1fr; }
+  .mix-panel { justify-content: flex-start; }
+}
+@media (max-width: 850px) {
+  .app-shell { grid-template-columns: 74px minmax(0,1fr); }
+  .app-sidebar { align-items: center; padding: 20px 9px 15px; }
+  .brand { justify-content: center; margin: 0 0 36px; }
+  .brand-copy, .sidebar-caption, .nav-label, .sidebar-status, .sidebar-footnote { display: none; }
+  .sidebar-nav { width: 100%; }
+  .nav-link { justify-content: center; padding: 0; }
+  .main-area .page-content { padding-right: 24px; padding-left: 24px; }
+  .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .pipeline-board { gap: 9px; }
+  .record-top { grid-template-columns: minmax(0,1fr) auto; }
+  .record-top-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .record-score { display: none; }
+}
+@media (max-width: 650px) {
+  .app-shell { display: block; }
+  .app-sidebar { position: sticky; z-index: 20; top: 0; display: flex; flex-direction: row; justify-content: space-between; width: 100%; height: auto; min-height: 0; padding: 10px 15px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .brand { margin: 0; }
+  .brand-symbol { width: 34px; height: 34px; }
+  .sidebar-nav { display: flex; width: auto; gap: 4px; }
+  .nav-link { width: 38px; height: 38px; min-height: 38px; border-radius: 10px; }
+  .main-area .page-content { padding: 24px 16px 38px; }
+  .topbar { height: 59px; padding: 0 16px; }
+  .session-pill { display: none; }
+  .page-title-row, .home-intro { align-items: flex-start; flex-direction: column; }
+  .home-layout { grid-template-columns: 1fr; }
+  .workflow-panel { min-height: 380px; }
+  .workflow-art { height: 155px; }
+  .stats-grid { gap: 9px; }
+  .stat-card { padding: 14px; }
+  .stat-value { font-size: 23px; }
+  .filter-bar { grid-template-columns: 1fr 1fr; }
+  .filter-bar .search-control { grid-column: 1 / -1; }
+  .toolbar { align-items: flex-start; flex-direction: column; }
+  .score-bars { grid-template-columns: 1fr; gap: 9px; }
+  .record-top { grid-template-columns: 1fr; gap: 10px; }
+  .record-top-actions { grid-column: auto; justify-content: space-between; }
+  .record-score { display: flex; }
+  .record-detail-grid, .record-management { grid-template-columns: 1fr; }
+  .pipeline-board { grid-template-columns: 1fr; }
+  .column-list { min-height: 110px; }
+  .result-grid { grid-template-columns: 1fr; gap: 10px; }
+  .form-footer { align-items: flex-start; flex-direction: column; }
+  .login-page { padding: 0; }
+  .login-shell { grid-template-columns: 1fr; min-height: 100vh; border: 0; border-radius: 0; }
+  .login-showcase { min-height: 290px; padding: 24px; }
+  .login-visual { position: absolute; right: -5px; bottom: 1px; width: 45%; min-height: 0; opacity: .8; }
+  .login-visual svg { width: 100%; }
+  .login-showcase-copy { max-width: 72%; margin-top: 40px; }
+  .login-showcase-copy h2 { font-size: 24px; }
+  .login-form-panel { padding: 34px 26px 42px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *:before, *:after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+"""
+
+
+NAV_ICONS = {
+    "/": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13.5 12 5l8 8.5"/><path d="M6.5 11v8h11v-8M10 19v-5h4v5"/></svg>',
+    "/dashboard": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="7" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="4" rx="1.5"/><rect x="13.5" y="10.5" width="6.5" height="9.5" rx="1.5"/><rect x="4" y="14" width="6.5" height="6" rx="1.5"/></svg>',
+    "/pipeline": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></svg>',
+    "/prospect-database": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18M10 12v2h4v-2"/></svg>',
+}
+
+
+def build_protected_page(markup: str, path: str, csrf_token: str):
+    page_names = {
+        "/": "New analysis", "/dashboard": "Overview", "/pipeline": "Pipeline",
+        "/prospect-database": "Business database",
+    }
+    page_name = page_names.get(path, "Workspace")
+    nav = []
+    for href, label in (
+        ("/", "Message lab"), ("/dashboard", "Overview"),
+        ("/pipeline", "Pipeline"), ("/prospect-database", "Businesses"),
+    ):
+        active = " active" if href == path else ""
+        current = ' aria-current="page"' if href == path else ""
+        nav.append(
+            f'<a class="nav-link{active}" href="{href}"{current} aria-label="{escape(label, quote=True)}">'
+            f'<span class="nav-icon">{NAV_ICONS[href]}</span><span class="nav-label">{label}</span></a>'
+        )
+    csrf_meta = f'<meta name="csrf-token" content="{escape(csrf_token, quote=True)}">'
+    markup = markup.replace("<head>", "<head>\n" + csrf_meta, 1)
+    markup = markup.replace("</head>", "<style>" + APP_THEME_CSS + "</style></head>", 1)
+    shell = f"""
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <a class="brand" href="/" aria-label="Business AI workspace home">
+      <span class="brand-symbol"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true"><path d="M12 2.8 14.3 9l6.2 2.6-6.2 2.3-2.3 6.2-2.6-6.2L3.2 11.6 9.4 9 12 2.8Z" fill="currentColor"/><circle cx="18.7" cy="5.3" r="1.4" fill="currentColor" opacity=".58"/></svg></span>
+      <span class="brand-copy"><span class="brand-title">BUSINESS AI</span><span class="brand-subtitle">Automation workspace</span></span>
+    </a>
+    <p class="sidebar-caption">WORKSPACE</p>
+    <nav class="sidebar-nav" aria-label="Primary navigation">{''.join(nav)}</nav>
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-status"><span class="status-pip"></span><div><strong>Private workspace</strong><span>Your records are protected by sign-in.</span></div></div>
+    <p class="sidebar-footnote">Single-owner workspace · Local data</p>
+  </aside>
+  <main class="main-area">
+    <header class="topbar">
+      <div class="breadcrumbs"><span>Workspace</span><span class="crumb-mark">/</span><strong>{escape(page_name)}</strong></div>
+      <div class="topbar-actions">
+        <span class="session-pill"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4.2" y="8.5" width="11.6" height="8.3" rx="2"/><path d="M6.8 8.5V6.2a3.2 3.2 0 0 1 6.4 0v2.3"/></svg>Protected session</span>
+        <button type="button" id="logoutButton">Sign out</button>
+      </div>
+    </header>
+    <div class="page-content">
+"""
+    markup = markup.replace("<body>", "<body>" + shell, 1)
+    logout_script = """
+<script>
+document.getElementById("logoutButton").addEventListener("click", async function () {
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const response = await fetch("/logout", {method: "POST", headers: {"X-CSRF-Token": csrf}});
+  if (response.ok) window.location.href = "/login";
+});
+</script>
+"""
+    return markup.replace("</body>", "</div></main></div>" + logout_script + "</body>", 1)
+
+
+def build_login_page(csrf_token: str, message: str = ""):
+    error = f'<p class="login-error" role="alert">{escape(message)}</p>' if message else ""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in · Business AI</title>
+  <style>
+    :root {{ --canvas:#f4f6fa; --ink:#17243b; --muted:#8190a5; --lime:#c9f27e; }}
+    * {{ box-sizing:border-box; }}
+    html,body {{ min-width:320px; min-height:100%; margin:0; }}
+    body {{ font-family:Inter,"Segoe UI Variable",Aptos,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); }}
+    button,input {{ font:inherit; }}
+    .login-page {{ min-height:100vh; padding:clamp(16px,4vw,40px); background:radial-gradient(circle at 12% 13%,rgba(193,231,158,.32),transparent 27%),radial-gradient(circle at 92% 85%,rgba(116,136,226,.13),transparent 26%),var(--canvas); }}
+    .login-shell {{ display:grid; grid-template-columns:minmax(0,1.05fr) minmax(360px,.95fr); overflow:hidden; width:min(100%,1040px); min-height:min(700px,calc(100vh - 80px)); margin:0 auto; border:1px solid #e7ebf0; border-radius:24px; background:#fff; box-shadow:0 28px 80px rgba(23,39,62,.12); }}
+    .login-showcase {{ position:relative; display:flex; flex-direction:column; justify-content:space-between; overflow:hidden; padding:clamp(28px,5vw,55px); color:#f3f6fb; background:radial-gradient(circle at 87% 18%,rgba(105,135,192,.28),transparent 27%),linear-gradient(145deg,#14243b,#213652 75%,#304965); }}
+    .login-showcase:before,.login-showcase:after {{ position:absolute; border:1px solid rgba(255,255,255,.09); border-radius:50%; content:""; }}
+    .login-showcase:before {{ top:22%; right:-120px; width:380px; height:380px; }}
+    .login-showcase:after {{ top:29%; right:-60px; width:260px; height:260px; }}
+    .login-brand {{ position:relative; z-index:1; display:flex; align-items:center; gap:12px; }}
+    .login-brand-mark {{ display:grid; width:38px; height:38px; place-items:center; border-radius:13px; color:#15263c; background:linear-gradient(145deg,#d7f79b,#9ee0c7); }}
+    .login-brand-name {{ color:#fff; font-size:12px; font-weight:750; letter-spacing:.12em; }}
+    .login-brand-sub {{ display:block; margin-top:2px; color:#9baec5; font-size:9px; }}
+    .login-visual {{ position:relative; z-index:1; display:grid; place-items:center; min-height:260px; }}
+    .login-visual svg {{ width:min(100%,390px); }}
+    .login-copy {{ position:relative; z-index:1; max-width:430px; }}
+    .login-kicker {{ display:flex; align-items:center; gap:8px; margin:0 0 10px; color:#b5c6d9; font-size:9px; font-weight:750; letter-spacing:.16em; text-transform:uppercase; }}
+    .login-copy h2 {{ margin:0; color:#fff; font-size:clamp(24px,3vw,36px); font-weight:650; letter-spacing:-.045em; line-height:1.2; }}
+    .login-copy p {{ max-width:390px; margin:12px 0 0; color:#afbed1; font-size:11px; line-height:1.8; }}
+    .login-form-panel {{ display:flex; flex-direction:column; justify-content:center; padding:clamp(28px,5vw,60px); }}
+    .login-form-panel h1 {{ margin:0; font-size:29px; font-weight:700; letter-spacing:-.045em; }}
+    .login-lede {{ margin:9px 0 27px; color:var(--muted); font-size:11px; line-height:1.7; }}
+    .login-error {{ margin:0 0 16px; padding:10px 12px; border:1px solid #f0d2cc; border-radius:9px; color:#9a4d45; background:#fff6f4; font-size:10px; }}
+    .login-label {{ display:block; margin:0 0 8px; color:#47566d; font-size:11px; font-weight:650; }}
+    .login-password {{ width:100%; min-height:46px; padding:0 13px; border:1px solid #e1e7ef; border-radius:10px; color:var(--ink); background:#fbfcfe; }}
+    .login-password:focus {{ border-color:#98a3ed; background:#fff; box-shadow:0 0 0 3px rgba(102,120,223,.10); outline:0; }}
+    .login-submit {{ display:flex; align-items:center; justify-content:center; width:100%; min-height:45px; margin-top:17px; border:0; border-radius:11px; color:#1c2c42; background:var(--lime); font-size:12px; font-weight:750; cursor:pointer; }}
+    .login-submit:hover {{ background:#d5f69b; }}
+    .login-protect {{ display:flex; align-items:center; gap:8px; margin-top:22px; color:#92a0b0; font-size:9px; }}
+    .login-protect svg {{ width:14px; height:14px; color:#6fa16f; }}
+    @media(max-width:650px) {{ .login-page {{ padding:0; }} .login-shell {{ grid-template-columns:1fr; min-height:100vh; border:0; border-radius:0; }} .login-showcase {{ min-height:290px; padding:24px; }} .login-visual {{ position:absolute; right:-5px; bottom:1px; width:45%; min-height:0; opacity:.8; }} .login-visual svg {{ width:100%; }} .login-copy {{ max-width:72%; margin-top:40px; }} .login-copy h2 {{ font-size:24px; }} .login-form-panel {{ padding:34px 26px 42px; }} }}
+  </style>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-showcase">
+      <div class="login-brand"><span class="login-brand-mark"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true"><path d="M12 2.8 14.3 9l6.2 2.6-6.2 2.3-2.3 6.2-2.6-6.2L3.2 11.6 9.4 9 12 2.8Z" fill="currentColor"/></svg></span><span><span class="login-brand-name">BUSINESS AI</span><span class="login-brand-sub">Automation workspace</span></span></div>
+      <div class="login-visual">
+        <svg viewBox="0 0 390 255" fill="none" role="img" aria-label="Abstract workflow illustration">
+          <circle cx="195" cy="126" r="83" stroke="#7386A5" stroke-opacity=".42"/>
+          <circle cx="195" cy="126" r="60" stroke="#A4B4CC" stroke-opacity=".25" stroke-dasharray="3 7"/>
+          <path d="M56 160c40-72 80 28 122-34 33-49 65-47 96-7 23 29 37 34 61 2" stroke="#C9F27E" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="57" cy="159" r="6" fill="#C9F27E"/><circle cx="179" cy="126" r="6" fill="#8ED3B5"/><circle cx="335" cy="121" r="6" fill="#C9F27E"/>
+          <rect x="131" y="77" width="129" height="97" rx="18" fill="#F7FAFD" fill-opacity=".96"/>
+          <rect x="147" y="94" width="49" height="7" rx="3.5" fill="#DCE4ED"/>
+          <rect x="147" y="109" width="83" height="6" rx="3" fill="#E8EDF3"/>
+          <rect x="147" y="124" width="61" height="6" rx="3" fill="#E8EDF3"/>
+          <rect x="147" y="145" width="72" height="15" rx="7.5" fill="#E8F5D9"/>
+          <path d="m157 152 3 3 6-6" stroke="#5C8750" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="267" y="46" width="54" height="42" rx="12" fill="#2B4261" stroke="#68809F" stroke-opacity=".6"/>
+          <path d="M281 73V63m9 10V57m9 16v-7" stroke="#C9F27E" stroke-width="4" stroke-linecap="round"/>
+          <rect x="67" y="88" width="48" height="39" rx="12" fill="#2B4261" stroke="#68809F" stroke-opacity=".6"/>
+          <circle cx="91" cy="101" r="5" stroke="#9DE0C7" stroke-width="2"/><path d="M81 117c2-6 6-8 10-8s8 2 10 8" stroke="#9DE0C7" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="login-copy"><p class="login-kicker">YOUR PRIVATE WORKSPACE</p><h2>Good decisions start with a little clarity.</h2><p>Review enquiries, spot the important details, and keep every next step in one calm place.</p></div>
+    </section>
+    <section class="login-form-panel">
+      <p class="login-kicker" style="color:#8b98aa">SECURE SIGN-IN</p>
+      <h1>Welcome back</h1>
+      <p class="login-lede">Sign in to continue to your protected automation workspace.</p>
+      {error}
+      <form method="post" action="/login">
+        <input type="hidden" name="csrf_token" value="{escape(csrf_token, quote=True)}">
+        <label class="login-label" for="password">Workspace password</label>
+        <input class="login-password" id="password" name="password" type="password" autocomplete="current-password" required>
+        <button class="login-submit" type="submit">Continue to workspace <span aria-hidden="true">→</span></button>
+      </form>
+      <div class="login-protect"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4.2" y="8.5" width="11.6" height="8.3" rx="2"/><path d="M6.8 8.5V6.2a3.2 3.2 0 0 1 6.4 0v2.3"/></svg>Your saved records stay behind sign-in.</div>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
+BUSINESS_DATABASE_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Businesses · Business AI</title>
+  <style>
+    .business-intro { margin-bottom: 22px; }
+    .business-toolbar { display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:14px; padding:14px 16px; }
+    .business-count { color:#8290a2; font-size:10px; }
+    .business-search { width:min(100%,360px); }
+    .business-list { display:grid; gap:12px; }
+    .business-card { padding:18px 20px; border:1px solid #e5eaf0; border-radius:15px; background:#fff; box-shadow:0 6px 18px rgba(28,45,70,.025); }
+    .business-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+    .business-card h2 { margin:0; color:#34435a; font-size:15px; letter-spacing:-.02em; }
+    .business-tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+    .business-tag { padding:4px 8px; border:1px solid #e7eaf2; border-radius:99px; color:#727f94; background:#fafbfe; font-size:9px; }
+    .business-location { margin:6px 0 0; color:#8794a5; font-size:10px; }
+    .business-site { color:#5d6dd1; font-size:10px; font-weight:650; }
+    .business-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:16px; }
+    .business-detail { min-width:0; padding:13px 14px; border:1px solid #edf0f4; border-radius:11px; background:#fbfcfe; }
+    .business-detail h3 { margin:0 0 8px; color:#53627a; font-size:10px; font-weight:700; }
+    .business-detail p { margin:4px 0; overflow-wrap:anywhere; color:#7a8799; font-size:10px; }
+    .business-detail strong { color:#46566f; font-weight:650; }
+    .business-sources { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; color:#6878cf; font-size:9px; }
+    .business-empty { padding:34px 18px; border:1px dashed #dce2eb; border-radius:14px; color:#8794a5; background:#fff; font-size:11px; text-align:center; }
+    @media(max-width:650px) { .business-toolbar { align-items:stretch; flex-direction:column; } .business-details { grid-template-columns:1fr; } .business-card-top { flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <section class="page-title-row business-intro">
+    <div>
+      <p class="eyebrow"><span class="eyebrow-dot"></span>PROSPECTING</p>
+      <h1>Business database</h1>
+      <p>One private workspace for businesses across industries, with published details separated from Hunter or Apollo enrichment.</p>
+    </div>
+  </section>
+  <section class="business-toolbar panel" aria-label="Business list tools">
+    <span class="business-count" id="businessCount">Loading saved businesses…</span>
+    <input class="filter-control business-search" id="businessSearch" type="search" placeholder="Search by name, industry, location or provider" aria-label="Search businesses">
+  </section>
+  <div class="business-list" id="businessList" aria-live="polite"></div>
+  <script>
+    let businessRows = [];
+    function textNode(tag, className, value) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      node.textContent = value == null ? "" : String(value);
+      return node;
+    }
+    function safeLink(value, label, className) {
+      if (!value) return null;
+      try {
+        const url = new URL(value, window.location.origin);
+        if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+        const link = textNode("a", className || "", label || value);
+        link.href = url.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        return link;
+      } catch (_) { return null; }
+    }
+    function detailBlock(title, fields) {
+      const panel = textNode("section", "business-detail", "");
+      panel.appendChild(textNode("h3", "", title));
+      fields.forEach(function (field) {
+        if (!field.value) return;
+        const row = textNode("p", "", "");
+        row.appendChild(textNode("strong", "", field.label + ": "));
+        row.appendChild(document.createTextNode(String(field.value)));
+        panel.appendChild(row);
+      });
+      return panel;
+    }
+    function renderBusiness(row) {
+      const card = textNode("article", "business-card", "");
+      const top = textNode("div", "business-card-top", "");
+      const identity = textNode("div", "", "");
+      identity.appendChild(textNode("h2", "", row.business_name || "Unnamed business"));
+      const tags = textNode("div", "business-tags", "");
+      [row.industry, row.business_type].filter(Boolean).forEach(function (value) {
+        tags.appendChild(textNode("span", "business-tag", value));
+      });
+      identity.appendChild(tags);
+      const location = [row.city, row.region, row.country].filter(Boolean).join(", ");
+      if (location) identity.appendChild(textNode("p", "business-location", location));
+      top.appendChild(identity);
+      const website = safeLink(row.website, row.website, "business-site");
+      if (website) top.appendChild(website);
+      card.appendChild(top);
+      const details = textNode("div", "business-details", "");
+      details.appendChild(detailBlock("Published by the business", [
+        {label:"Email",value:row.business_email}, {label:"Phone",value:row.business_phone},
+        {label:"Named contact",value:row.contact_name}, {label:"Role",value:row.contact_role}
+      ]));
+      const enriched = detailBlock("Third-party enrichment", [
+        {label:"Provider",value:row.enrichment_provider},
+        {label:"Status",value:row.enrichment_status},
+        {label:"Confidence",value:row.enrichment_confidence},
+        {label:"Email",value:row.enriched_email}, {label:"Phone",value:row.enriched_phone},
+        {label:"Contact",value:row.enriched_contact_name}, {label:"Role",value:row.enriched_contact_role}
+      ]);
+      if (!row.enrichment_provider && !row.enriched_email && !row.enriched_phone && !row.enriched_contact_name) {
+        enriched.appendChild(textNode("p", "", "No third-party enrichment saved."));
+      }
+      details.appendChild(enriched);
+      card.appendChild(details);
+      const sources = textNode("div", "business-sources", "");
+      const source = safeLink(row.source_url, "Business source", "");
+      const contactSource = safeLink(row.contact_source_url, "Published contact source", "");
+      const enrichmentSource = safeLink(row.enrichment_source_url, "Enrichment source", "");
+      [source, contactSource, enrichmentSource].filter(Boolean).forEach(function (link) { sources.appendChild(link); });
+      if (sources.childNodes.length) card.appendChild(sources);
+      return card;
+    }
+    function renderBusinesses() {
+      const query = document.getElementById("businessSearch").value.trim().toLowerCase();
+      const filtered = businessRows.filter(function (row) {
+        return [row.business_name,row.industry,row.business_type,row.city,row.region,row.country,
+          row.enrichment_provider,row.enrichment_status,row.enriched_contact_name,row.enriched_email]
+          .some(function (value) { return String(value || "").toLowerCase().includes(query); });
+      });
+      const list = document.getElementById("businessList");
+      list.replaceChildren();
+      document.getElementById("businessCount").textContent = filtered.length + " of " + businessRows.length + " saved businesses";
+      if (!filtered.length) {
+        list.appendChild(textNode("div", "business-empty", businessRows.length ? "No businesses match that search." : "No businesses saved yet. Use the Business Prospect Finder skill with Agensi tools, then ask it to save selected results here."));
+        return;
+      }
+      filtered.forEach(function (row) { list.appendChild(renderBusiness(row)); });
+    }
+    document.getElementById("businessSearch").addEventListener("input", renderBusinesses);
+    fetch("/businesses?limit=500", {credentials:"same-origin"}).then(function (response) {
+      if (!response.ok) throw new Error("Could not load the private business list.");
+      return response.json();
+    }).then(function (data) {
+      businessRows = Array.isArray(data) ? data : [];
+      renderBusinesses();
+    }).catch(function (error) {
+      document.getElementById("businessCount").textContent = "Business list unavailable";
+      document.getElementById("businessList").appendChild(textNode("div", "business-empty", error.message));
+    });
+  </script>
+</body>
+</html>"""
+
+
+HOME_PAGE = """<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Message lab · Business AI</title></head>
+<body>
+  <section class="home-intro">
+    <div class="hero-heading">
+      <p class="eyebrow"><span class="eyebrow-dot"></span>SMART WORKFLOW</p>
+      <h1>Turn every enquiry into a clear next step.</h1>
+      <p>Paste a customer message and let AI organise the signal: category, urgency, lead score, and a reply draft you can review.</p>
+    </div>
+  </section>
+  <div class="home-layout">
+    <form class="panel composer-panel" id="automationForm">
+      <div class="panel-heading">
+        <div><h2>Analyse a customer message</h2><p>Start with a message you want to understand.</p></div>
+        <span class="badge category">PRIVATE INPUT</span>
+      </div>
+      <div class="field">
+        <label class="input-label" for="email">Customer email <span class="optional-label">Optional</span></label>
+        <input class="text-input" id="email" name="email" type="email" maxlength="320" placeholder="name@company.com">
+      </div>
+      <div class="field">
+        <label class="input-label" for="message">Message <span class="optional-label">Required</span></label>
+        <textarea class="text-area" id="message" name="message" maxlength="5000" required placeholder="Paste an enquiry, support request, or customer note here…"></textarea>
+        <p class="field-help">Only submit messages you’re authorised to process. The app keeps records in its configured database.</p>
+      </div>
+      <div class="sample-row" aria-label="Example messages">
+        <span class="sample-label">TRY A SAMPLE</span>
+        <button class="sample-chip" type="button" data-example="quote">Quote request</button>
+        <button class="sample-chip" type="button" data-example="support">Support issue</button>
+        <button class="sample-chip" type="button" data-example="followup">Follow-up</button>
+      </div>
+      <div class="form-footer">
+        <span class="privacy-note"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4.2" y="8.5" width="11.6" height="8.3" rx="2"/><path d="M6.8 8.5V6.2a3.2 3.2 0 0 1 6.4 0v2.3"/></svg>Saved records require your sign-in</span>
+        <button class="btn-primary" id="runButton" type="submit">Analyse message <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10h11M10 5l5 5-5 5"/></svg></button>
+      </div>
+      <div class="result-slot" id="result" aria-live="polite"></div>
+    </form>
+    <aside class="workflow-panel">
+      <p class="eyebrow"><span class="eyebrow-dot"></span>FROM MESSAGE TO MOMENTUM</p>
+      <div class="workflow-art" aria-hidden="true">
+        <svg viewBox="0 0 280 180" fill="none">
+          <circle cx="140" cy="89" r="69" stroke="#AFC0D6" stroke-opacity=".28"/>
+          <circle cx="140" cy="89" r="52" stroke="#AFC0D6" stroke-opacity=".18" stroke-dasharray="3 7"/>
+          <path d="M29 118c33-51 61 29 94-13 26-34 51-38 77-8 17 20 29 25 52 0" stroke="#C9F27E" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="29" cy="118" r="5" fill="#C9F27E"/><circle cx="123" cy="105" r="5" fill="#9DE0C7"/><circle cx="252" cy="97" r="5" fill="#C9F27E"/>
+          <rect x="97" y="52" width="86" height="72" rx="14" fill="#F8FAFC"/>
+          <rect x="110" y="66" width="38" height="5" rx="2.5" fill="#D7E0EA"/>
+          <rect x="110" y="78" width="57" height="4" rx="2" fill="#E6EBF1"/>
+          <rect x="110" y="88" width="47" height="4" rx="2" fill="#E6EBF1"/>
+          <rect x="110" y="102" width="48" height="12" rx="6" fill="#E8F5D9"/>
+          <path d="m118 108 2.4 2.4 4.6-4.8" stroke="#5C8750" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="206" y="35" width="42" height="34" rx="10" fill="#263F60" stroke="#637D9E" stroke-opacity=".7"/>
+          <path d="M217 59V50m9 9V44m9 15v-6" stroke="#C9F27E" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h2>Good follow-through starts with a better first read.</h2>
+      <p>Keep the human in control. Review the analysis, decide what to save, and choose the next step yourself.</p>
+      <ol class="workflow-steps">
+        <li class="workflow-step"><span class="step-number">01</span><div><strong>Understand the message</strong><span>Category, priority, and customer intent.</span></div></li>
+        <li class="workflow-step"><span class="step-number">02</span><div><strong>See the opportunity</strong><span>A lead score with a suggested response.</span></div></li>
+        <li class="workflow-step"><span class="step-number">03</span><div><strong>Choose what happens next</strong><span>Track it in your dashboard and pipeline.</span></div></li>
+      </ol>
+    </aside>
+  </div>
+  <script>
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    const form = document.getElementById("automationForm");
+    const messageField = document.getElementById("message");
+    const resultBox = document.getElementById("result");
+    const runButton = document.getElementById("runButton");
+    const examples = {
+      quote: "Hello, I run a growing team and would like to know more about your services and pricing. Could we arrange a call this week?",
+      support: "I have tried signing in several times today, but the password reset link never arrives. Please help me regain access.",
+      followup: "Thanks for sending the proposal. We are reviewing it internally and expect to make a decision by the end of next week."
+    };
+    document.querySelectorAll("[data-example]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        messageField.value = examples[button.dataset.example] || "";
+        messageField.focus();
+      });
+    });
+    function escapeHtml(value) {
+      const replacements = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+      return String(value ?? "").replace(/[&<>"']/g, function (character) { return replacements[character]; });
     }
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
@@ -576,5 +1039,4 @@ PIPELINE_PAGE = """<!doctype html>
   </script>
 </body>
 </html>"""
-
 
