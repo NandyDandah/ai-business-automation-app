@@ -141,14 +141,14 @@ class AuthenticationTests(unittest.TestCase):
         invalid = self.client.post("/prospects/batch", json={"prospects": [{"clinic_name": "Missing source"}]}, headers=headers)
         self.assertEqual(invalid.status_code, 422)
 
-    def test_clinic_skill_documents_tool_costs_and_safe_api_use(self):
-        root = Path(__file__).resolve().parents[1] / "skills" / "clinic-prospect-finder"
+    def test_business_skill_documents_tool_costs_and_safe_api_use(self):
+        root = Path(__file__).resolve().parents[1] / "skills" / "business-prospect-finder"
         skill = (root / "SKILL.md").read_text(encoding="utf-8")
         api = (root / "references" / "api-integration.md").read_text(encoding="utf-8")
-        self.assertTrue(skill.startswith("---\nname: UK Dental Clinic Prospect Finder\n"))
+        self.assertTrue(skill.startswith("---\nname: Business Prospect Finder\n"))
         self.assertIn("quote_tool", skill)
         self.assertIn("approved the exact quote and amount", skill)
-        self.assertIn("POST to /prospects/batch", api)
+        self.assertIn("POST to `/businesses/batch`", api)
         self.assertIn("Authorization: Bearer", api)
 
     def test_sensitive_html_is_not_cached_and_has_csrf(self):

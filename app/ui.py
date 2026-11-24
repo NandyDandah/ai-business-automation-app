@@ -1071,7 +1071,7 @@ HOME_PAGE = """<!doctype html>
       <div class="field">
         <label class="input-label" for="message">Message <span class="optional-label">Required</span></label>
         <textarea class="text-area" id="message" name="message" maxlength="5000" required placeholder="Paste an enquiry, support request, or customer note here…"></textarea>
-        <p class="field-help">Only submit messages you’re authorised to process. The app keeps records in its configured database.</p>
+        <p class="field-help">Only submit messages you’re authorised to process. When an AI key is configured, the message text is sent to that provider and may incur charges; the optional email field is not sent. The app stores the message and analysis in its database.</p>
       </div>
       <div class="sample-row" aria-label="Example messages">
         <span class="sample-label">TRY A SAMPLE</span>

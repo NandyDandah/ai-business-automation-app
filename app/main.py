@@ -23,7 +23,7 @@ load_dotenv()
 from app.database import (
     SessionLocal, Automation, Campaign, CampaignProspect, HomeownerInquiry, Prospect, create_tables,
 )
-from app.ai_service import analyse_business_message
+from app.ai_service import AIProviderError, analyse_business_message
 from app.prospecting import ProspectingError, discover_openstreetmap_businesses, draft_outreach_messages
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
@@ -225,8 +225,8 @@ app.openapi = custom_openapi
 create_tables()
 
 class AutomationRequest(BaseModel):
-    message: str
-    email: str = ""
+    message: str = Field(min_length=1, max_length=5000)
+    email: str = Field(default="", max_length=320)
 
 class ProspectInput(BaseModel):
     business_name: str = Field(default="", max_length=200)
@@ -375,7 +375,10 @@ def home(request: Request):
 
 @app.post("/automate")
 def automate(request: AutomationRequest, db: Session = Depends(get_db)):
-    ai_result = analyse_business_message(request.message)
+    try:
+        ai_result = analyse_business_message(request.message)
+    except AIProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
 
     record = Automation(
         customer_email=request.email,
