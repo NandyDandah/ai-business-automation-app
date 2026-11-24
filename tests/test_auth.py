@@ -1,6 +1,8 @@
+import csv
 import os
 import re
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -73,6 +75,8 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('id="fillSampleBrief"', response.text)
         self.assertIn('id="runDemoSimulation"', response.text)
+        self.assertIn('id="campaignCsvPreviewForm"', response.text)
+        self.assertIn('id="importCampaignCsv"', response.text)
         self.assertIn(
             'name="max_results"><option value="10">Up to 10</option><option value="20" selected>Up to 20</option>',
             response.text,
@@ -96,6 +100,81 @@ class AuthenticationTests(unittest.TestCase):
         self.assertFalse(response.json()["sent"])
         self.assertEqual(response.json()["draft_mode"], "Local demo (no AI call)")
         draft_provider.assert_not_called()
+
+    def test_campaign_pipeline_supports_the_full_sales_progression(self):
+        with SessionLocal() as db:
+            campaign = Campaign(title="Pipeline stages test", offer="Synthetic offer")
+            prospect = Prospect(
+                business_name="Pipeline Demo Business", source_url="https://example.invalid/listing",
+                fingerprint="pipeline-stage-demo",
+            )
+            db.add_all([campaign, prospect])
+            db.commit()
+            db.add(CampaignProspect(campaign_id=campaign.id, prospect_id=prospect.id))
+            db.commit()
+            campaign_id, prospect_id = campaign.id, prospect.id
+
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        response = self.client.patch(
+            f"/api/campaigns/{campaign_id}/leads/{prospect_id}",
+            json={
+                "pipeline_stage": "meeting", "campaign_notes": "Asked for a proposal next week.",
+                "follow_up_date": "2026-12-02", "deal_value": 2500,
+            }, headers=headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        detail = self.client.get(f"/api/campaigns/{campaign_id}", headers=headers)
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["leads"][0]["pipeline_stage"], "meeting")
+        self.assertEqual(detail.json()["leads"][0]["campaign_notes"], "Asked for a proposal next week.")
+        self.assertEqual(detail.json()["leads"][0]["follow_up_date"], "2026-12-02")
+        self.assertEqual(detail.json()["leads"][0]["deal_value"], 2500)
+        lost = self.client.patch(
+            f"/api/campaigns/{campaign_id}/leads/{prospect_id}",
+            json={"pipeline_stage": "lost", "lost_reason": "price"}, headers=headers,
+        )
+        self.assertEqual(lost.status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/campaigns/{campaign_id}", headers=headers).json()["leads"][0]["lost_reason"],
+            "price",
+        )
+        invalid = self.client.patch(
+            f"/api/campaigns/{campaign_id}/leads/{prospect_id}",
+            json={"pipeline_stage": "scheduled"}, headers=headers,
+        )
+        self.assertEqual(invalid.status_code, 422)
+
+    def test_campaign_export_includes_pipeline_fields_and_neutralizes_formulas(self):
+        with SessionLocal() as db:
+            campaign = Campaign(title="Export safety test", offer="Synthetic offer")
+            prospect = Prospect(
+                business_name='=HYPERLINK("https://example.invalid")',
+                source_url="https://example.invalid/listing", fingerprint="export-safety-demo",
+            )
+            db.add_all([campaign, prospect])
+            db.commit()
+            db.add(CampaignProspect(
+                campaign_id=campaign.id, prospect_id=prospect.id, pipeline_stage="proposal",
+                campaign_notes="=2+2", follow_up_date=date(2026, 12, 2), deal_value=2500,
+            ))
+            db.commit()
+            campaign_id = campaign.id
+
+        response = self.client.get(f"/api/campaigns/{campaign_id}/export.csv")
+        self.assertEqual(response.status_code, 401)
+        response = self.client.get(
+            f"/api/campaigns/{campaign_id}/export.csv",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(response.text.splitlines()))
+        headers = rows[0]
+        values = dict(zip(headers, rows[1]))
+        self.assertEqual(values["Business"], "'=HYPERLINK(\"https://example.invalid\")")
+        self.assertEqual(values["Pipeline stage"], "proposal")
+        self.assertEqual(values["Follow-up date"], "2026-12-02")
+        self.assertEqual(values["Deal value"], "2500")
+        self.assertEqual(values["Campaign notes"], "'=2+2")
 
     def test_login_csrf_write_protection_and_logout(self):
         page = self.client.get("/login")
@@ -209,6 +288,58 @@ class AuthenticationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         discover.assert_called_once_with("Aesthetic clinic", "Birmingham, United Kingdom", 5000, limit=20)
+
+    def test_campaign_csv_preview_saves_nothing_and_import_deduplicates(self):
+        with SessionLocal() as db:
+            campaign = Campaign(
+                title="CSV import test", industry="Healthcare", business_type="Dental clinic",
+                country="United Kingdom", offer="Synthetic test only",
+            )
+            db.add(campaign)
+            db.commit()
+            campaign_id = campaign.id
+
+        csv_content = (
+            "company;website;public_email;city;source_url\n"
+            "Sample Dental;https://sample-dental.invalid;hello@sample-dental.invalid;Leeds;https://directory.invalid/sample-dental\n"
+            "Sample Dental;https://sample-dental.invalid;hello@sample-dental.invalid;Leeds;https://directory.invalid/sample-dental\n"
+            "Missing source;;;Leeds;\n"
+        ).encode("utf-8")
+        files = {"file": ("businesses.csv", csv_content, "text/csv")}
+        denied = self.client.post(f"/api/campaigns/{campaign_id}/import-csv/preview", files=files)
+        self.assertEqual(denied.status_code, 401)
+
+        headers = {"Authorization": f"Bearer {TOKEN}"}
+        preview = self.client.post(
+            f"/api/campaigns/{campaign_id}/import-csv/preview", files=files, headers=headers
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(preview.json()["valid_rows"], 1)
+        self.assertEqual(preview.json()["duplicate_rows"], 1)
+        self.assertEqual(preview.json()["invalid_rows"], 1)
+        self.assertEqual(preview.json()["will_add"], 1)
+        self.assertFalse(preview.json()["saved"])
+        with SessionLocal() as db:
+            self.assertEqual(db.query(Prospect).count(), 0)
+            self.assertEqual(db.query(CampaignProspect).count(), 0)
+
+        imported = self.client.post(
+            f"/api/campaigns/{campaign_id}/import-csv", files=files, headers=headers
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()["created_businesses"], 1)
+        self.assertEqual(imported.json()["added_to_campaign"], 1)
+        self.assertEqual(imported.json()["invalid_rows"], 1)
+        self.assertEqual(imported.json()["duplicate_rows"], 1)
+        self.assertEqual(imported.json()["campaign"]["leads"][0]["business_email"], "hello@sample-dental.invalid")
+
+        repeated = self.client.post(
+            f"/api/campaigns/{campaign_id}/import-csv", files=files, headers=headers
+        )
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["created_businesses"], 0)
+        self.assertEqual(repeated.json()["added_to_campaign"], 0)
+        self.assertEqual(repeated.json()["already_in_campaign"], 1)
 
     def test_openstreetmap_retries_a_busy_wide_search_at_one_kilometre(self):
         place = {

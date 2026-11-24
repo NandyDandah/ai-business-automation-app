@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+    Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
     create_engine, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, synonym
@@ -120,6 +120,10 @@ class CampaignProspect(Base):
     draft_reason = Column(Text, nullable=False, default="")
     draft_status = Column(String(24), nullable=False, default="not_drafted", index=True)
     pipeline_stage = Column(String(24), nullable=False, default="new", index=True)
+    campaign_notes = Column(Text, nullable=False, default="")
+    follow_up_date = Column(Date, nullable=True)
+    deal_value = Column(Integer, nullable=True)
+    lost_reason = Column(String(80), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
@@ -177,3 +181,19 @@ def create_tables():
                 connection.execute(
                     text(f"ALTER TABLE prospects ADD COLUMN {name} {definition}")
                 )
+
+    inspector = inspect(engine)
+    if inspector.has_table("campaign_prospects"):
+        campaign_columns = {column["name"] for column in inspector.get_columns("campaign_prospects")}
+        campaign_additions = {
+            "campaign_notes": "TEXT NOT NULL DEFAULT ''",
+            "follow_up_date": "DATE",
+            "deal_value": "INTEGER",
+            "lost_reason": "VARCHAR(80) NOT NULL DEFAULT ''",
+        }
+        with engine.begin() as connection:
+            for name, definition in campaign_additions.items():
+                if name not in campaign_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE campaign_prospects ADD COLUMN {name} {definition}")
+                    )

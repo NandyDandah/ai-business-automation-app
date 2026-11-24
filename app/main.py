@@ -4,7 +4,7 @@ import os
 import re
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import escape as escape_html
 from threading import Lock
 from typing import Literal, Optional
@@ -12,10 +12,10 @@ from urllib.parse import urlparse
 from io import StringIO
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, ValidationError, root_validator
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -27,6 +27,7 @@ from app.database import (
 )
 from app.ai_service import AIProviderError, analyse_business_message
 from app.prospecting import ProspectingError, discover_openstreetmap_businesses, draft_outreach_messages
+from app.csv_import import MAX_CSV_BYTES, parse_business_csv
 from app.simulation import build_demo_simulation, one_business_timeline, simulate_business_fit
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
@@ -352,7 +353,11 @@ class CampaignLeadUpdateInput(BaseModel):
     draft_subject: Optional[str] = Field(default=None, max_length=240)
     draft_body: Optional[str] = Field(default=None, max_length=3000)
     draft_status: Optional[Literal["needs_review", "approved", "rejected"]] = None
-    pipeline_stage: Optional[Literal["new", "contacted", "replied", "won", "lost"]] = None
+    pipeline_stage: Optional[Literal["new", "contacted", "replied", "interested", "meeting", "proposal", "won", "lost"]] = None
+    campaign_notes: Optional[str] = Field(default=None, max_length=3000)
+    follow_up_date: Optional[date] = None
+    deal_value: Optional[int] = Field(default=None, ge=0, le=1_000_000_000)
+    lost_reason: Optional[Literal["not_interested", "later", "wrong_number", "competitor", "price", "no_reply", "other"]] = None
 
     @root_validator(skip_on_failure=True)
     def require_update_value(cls, values):
@@ -485,6 +490,16 @@ def update_follow_up(record_id: int, follow_up_date: str = "", db: Session = Dep
 
     return {"message": "Follow-up updated"}
 
+
+def _safe_csv_cell(value):
+    """Neutralize text cells that spreadsheet apps could interpret as formulas."""
+    if not isinstance(value, str):
+        return value
+    if value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
 @app.get("/export")
 def export_records(db: Session = Depends(get_db)):
     records = db.query(Automation).order_by(Automation.id.desc()).all()
@@ -499,8 +514,10 @@ def export_records(db: Session = Depends(get_db)):
 
     for r in records:
         writer.writerow([
-            r.id, r.customer_email, r.customer_message, r.category, r.priority,
-            r.status, r.lead_score, r.follow_up_date, r.notes, r.ai_reply, r.created_at
+            _safe_csv_cell(value) for value in [
+                r.id, r.customer_email, r.customer_message, r.category, r.priority,
+                r.status, r.lead_score, r.follow_up_date, r.notes, r.ai_reply, r.created_at
+            ]
         ])
 
     output.seek(0)
@@ -804,11 +821,19 @@ def _campaign_detail(db: Session, campaign: Campaign):
             "draft_reason": campaign_lead.draft_reason or "",
             "draft_status": campaign_lead.draft_status or "not_drafted",
             "pipeline_stage": campaign_lead.pipeline_stage or "new",
+            "campaign_notes": campaign_lead.campaign_notes or "",
+            "follow_up_date": campaign_lead.follow_up_date.isoformat() if campaign_lead.follow_up_date else "",
+            "deal_value": campaign_lead.deal_value,
+            "lost_reason": campaign_lead.lost_reason or "",
             "draft_updated_at": campaign_lead.updated_at.isoformat() if campaign_lead.updated_at else "",
         })
         leads.append(item)
     counts = {state: sum(1 for item in leads if item["draft_status"] == state)
               for state in ("not_drafted", "needs_review", "approved", "rejected")}
+    pipeline_counts = {
+        state: sum(1 for item in leads if item["pipeline_stage"] == state)
+        for state in ("new", "contacted", "replied", "interested", "meeting", "proposal", "won", "lost")
+    }
     return {
         "id": campaign.id,
         "title": campaign.title,
@@ -823,7 +848,57 @@ def _campaign_detail(db: Session, campaign: Campaign):
         "created_at": campaign.created_at.isoformat() if campaign.created_at else "",
         "lead_count": len(leads),
         "draft_counts": counts,
+        "pipeline_counts": pipeline_counts,
         "leads": leads,
+    }
+
+
+async def _validated_csv_upload(upload: UploadFile):
+    if not upload.filename or not upload.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=415, detail="Choose a .csv file.")
+    contents = await upload.read(MAX_CSV_BYTES + 1)
+    try:
+        parsed = parse_business_csv(contents)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    invalid_rows = len(parsed["invalid"])
+    valid_rows = []
+    fingerprints = set()
+    duplicate_rows = 0
+    for values in parsed["rows"]:
+        try:
+            item = ProspectInput(**values)
+        except ValidationError:
+            invalid_rows += 1
+            continue
+        fingerprint = _prospect_fingerprint(item)
+        if fingerprint in fingerprints:
+            duplicate_rows += 1
+            continue
+        fingerprints.add(fingerprint)
+        valid_rows.append((item, fingerprint))
+    return valid_rows, invalid_rows, duplicate_rows
+
+
+def _campaign_csv_counts(db: Session, campaign_id: int, valid_rows):
+    if not valid_rows:
+        return {"new_businesses": 0, "existing_businesses": 0, "already_in_campaign": 0}
+    fingerprints = [fingerprint for _, fingerprint in valid_rows]
+    existing = db.query(Prospect).filter(Prospect.fingerprint.in_(fingerprints)).all()
+    existing_by_fingerprint = {item.fingerprint: item for item in existing}
+    existing_ids = [item.id for item in existing]
+    linked_ids = set()
+    if existing_ids:
+        linked_ids = {
+            prospect_id for (prospect_id,) in db.query(CampaignProspect.prospect_id).filter(
+                CampaignProspect.campaign_id == campaign_id,
+                CampaignProspect.prospect_id.in_(existing_ids),
+            ).all()
+        }
+    return {
+        "new_businesses": sum(1 for _, fingerprint in valid_rows if fingerprint not in existing_by_fingerprint),
+        "existing_businesses": len(existing_by_fingerprint),
+        "already_in_campaign": len(linked_ids),
     }
 
 
@@ -1053,6 +1128,99 @@ def add_saved_businesses_to_campaign(
     return _campaign_detail(db, campaign)
 
 
+@app.post("/api/campaigns/{campaign_id}/import-csv/preview")
+async def preview_campaign_csv(
+    campaign_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Validate a business CSV without saving any rows or calling providers."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    valid_rows, invalid_rows, duplicate_rows = await _validated_csv_upload(file)
+    counts = _campaign_csv_counts(db, campaign_id, valid_rows)
+    return {
+        "valid_rows": len(valid_rows),
+        "invalid_rows": invalid_rows,
+        "duplicate_rows": duplicate_rows,
+        "new_businesses": counts["new_businesses"],
+        "existing_businesses": counts["existing_businesses"],
+        "already_in_campaign": counts["already_in_campaign"],
+        "will_add": counts["new_businesses"] + counts["existing_businesses"] - counts["already_in_campaign"],
+        "sample_names": [item.business_name for item, _ in valid_rows[:5]],
+        "saved": False,
+    }
+
+
+@app.post("/api/campaigns/{campaign_id}/import-csv")
+async def import_campaign_csv(
+    campaign_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Import a confirmed, source-backed CSV into the business database and campaign."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    valid_rows, invalid_rows, duplicate_rows = await _validated_csv_upload(file)
+    if not valid_rows:
+        raise HTTPException(status_code=422, detail="No valid, source-backed business rows were found.")
+
+    fingerprints = [fingerprint for _, fingerprint in valid_rows]
+    existing = db.query(Prospect).filter(Prospect.fingerprint.in_(fingerprints)).all()
+    by_fingerprint = {item.fingerprint: item for item in existing}
+    linked_ids = set()
+    if existing:
+        linked_ids = {
+            prospect_id for (prospect_id,) in db.query(CampaignProspect.prospect_id).filter(
+                CampaignProspect.campaign_id == campaign_id,
+                CampaignProspect.prospect_id.in_([item.id for item in existing]),
+            ).all()
+        }
+    created = 0
+    linked = 0
+    already_linked = 0
+    try:
+        for item, fingerprint in valid_rows:
+            prospect = by_fingerprint.get(fingerprint)
+            if prospect is None:
+                prospect = Prospect(
+                    business_name=item.business_name.strip(), industry=item.industry.strip(),
+                    business_type=item.business_type.strip(), website=item.website.strip(),
+                    city=item.city.strip(), region=item.region.strip(), country=item.country.strip(),
+                    postal_code=item.postal_code.strip(), business_email=item.business_email.strip(),
+                    business_phone=item.business_phone.strip(), contact_name=item.contact_name.strip(),
+                    contact_role=item.contact_role.strip(), source_url=item.source_url.strip(),
+                    contact_source_url=item.contact_source_url.strip(), fit_score=0,
+                    fit_summary="Imported from CSV; verify the source and contact details.",
+                    fingerprint=fingerprint,
+                )
+                db.add(prospect)
+                db.flush()
+                by_fingerprint[fingerprint] = prospect
+                created += 1
+            if prospect.id in linked_ids:
+                already_linked += 1
+                continue
+            db.add(CampaignProspect(campaign_id=campaign_id, prospect_id=prospect.id))
+            linked_ids.add(prospect.id)
+            linked += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "created_businesses": created,
+        "existing_businesses": len(valid_rows) - created,
+        "added_to_campaign": linked,
+        "already_in_campaign": already_linked,
+        "invalid_rows": invalid_rows,
+        "duplicate_rows": duplicate_rows,
+        "campaign": _campaign_detail(db, campaign),
+    }
+
+
 @app.post("/api/campaigns/{campaign_id}/drafts")
 def generate_campaign_drafts(
     campaign_id: int,
@@ -1213,6 +1381,14 @@ def update_campaign_lead(
         campaign_lead.reviewed_at = None
     if "pipeline_stage" in values:
         campaign_lead.pipeline_stage = values["pipeline_stage"]
+    if "campaign_notes" in values:
+        campaign_lead.campaign_notes = (values["campaign_notes"] or "").strip()
+    if "follow_up_date" in values:
+        campaign_lead.follow_up_date = values["follow_up_date"]
+    if "deal_value" in values:
+        campaign_lead.deal_value = values["deal_value"]
+    if "lost_reason" in values:
+        campaign_lead.lost_reason = values["lost_reason"] or ""
     campaign_lead.updated_at = datetime.utcnow()
     db.commit()
     return {"updated": True, "draft_status": campaign_lead.draft_status}
@@ -1248,15 +1424,20 @@ def export_campaign(campaign_id: int, db: Session = Depends(get_db)):
     writer.writerow([
         "Business", "Industry", "Type", "City", "Region", "Country", "Website",
         "Published email", "Published phone", "Source", "Pipeline stage", "Draft status",
+        "Follow-up date", "Deal value", "Lost reason", "Campaign notes",
         "Draft subject", "Draft message", "Data attribution",
     ])
     for campaign_lead, prospect in joined:
         writer.writerow([
-            prospect.business_name, prospect.industry, prospect.business_type, prospect.city, prospect.region,
-            prospect.country, prospect.website, prospect.business_email, prospect.business_phone, prospect.source_url,
-            campaign_lead.pipeline_stage, campaign_lead.draft_status, campaign_lead.draft_subject,
-            campaign_lead.draft_body,
-            "© OpenStreetMap contributors" if "openstreetmap.org" in (prospect.source_url or "") else "",
+            _safe_csv_cell(value) for value in [
+                prospect.business_name, prospect.industry, prospect.business_type, prospect.city, prospect.region,
+                prospect.country, prospect.website, prospect.business_email, prospect.business_phone, prospect.source_url,
+                campaign_lead.pipeline_stage, campaign_lead.draft_status,
+                campaign_lead.follow_up_date.isoformat() if campaign_lead.follow_up_date else "",
+                campaign_lead.deal_value, campaign_lead.lost_reason, campaign_lead.campaign_notes,
+                campaign_lead.draft_subject, campaign_lead.draft_body,
+                "© OpenStreetMap contributors" if "openstreetmap.org" in (prospect.source_url or "") else "",
+            ]
         ])
     return StreamingResponse(
         iter([output.getvalue()]),

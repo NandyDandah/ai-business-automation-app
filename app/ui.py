@@ -683,7 +683,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
     .campaign-panel > p { color:#8290a2; font-size:10px; line-height:1.6; }
     .campaign-form { display:grid; gap:11px; }
     .campaign-form label { display:grid; gap:5px; color:#596980; font-size:10px; font-weight:650; }
-    .campaign-form input,.campaign-form select,.campaign-form textarea,.campaign-discovery input,.campaign-discovery select,.draft-editor input,.draft-editor textarea { width:100%; padding:10px 11px; border:1px solid #dfe6ef; border-radius:9px; color:#26364d; background:#fbfcfe; font:inherit; font-size:11px; }
+    .campaign-form input,.campaign-form select,.campaign-form textarea,.campaign-discovery input,.campaign-discovery select,.campaign-editor-label input,.campaign-editor-label select,.campaign-editor-label textarea,.draft-editor input,.draft-editor textarea { width:100%; padding:10px 11px; border:1px solid #dfe6ef; border-radius:9px; color:#26364d; background:#fbfcfe; font:inherit; font-size:11px; }
     .campaign-form textarea,.draft-editor textarea { min-height:76px; resize:vertical; line-height:1.55; }
     .campaign-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     .campaign-list { display:grid; gap:9px; margin-top:12px; }
@@ -699,6 +699,14 @@ CAMPAIGNS_PAGE = """<!doctype html>
     .campaign-discovery label { display:grid; gap:5px; color:#596980; font-size:9px; font-weight:650; }
     .campaign-privacy { padding:13px 14px; border:1px solid #e5e9f1; border-radius:11px; color:#76849a; background:#f8fafc; font-size:9px; line-height:1.6; }
     .campaign-privacy strong { color:#526178; }
+    .campaign-import { margin-top:14px; padding-top:14px; border-top:1px solid #edf0f5; }
+    .campaign-import h3 { margin:0 0 5px; color:#526178; font-size:11px; }
+    .campaign-import p { margin:0 0 9px; color:#8794a5; font-size:9px; line-height:1.5; }
+    .campaign-import-form { display:grid; gap:8px; }
+    .campaign-import-form label { display:grid; gap:5px; color:#596980; font-size:9px; font-weight:650; }
+    .campaign-import-form input[type=file] { width:100%; padding:8px; border:1px solid #dfe6ef; border-radius:9px; color:#637188; background:#fbfcfe; font:inherit; font-size:9px; }
+    .campaign-import-preview { margin-top:10px; padding:10px; border:1px solid #e8edf3; border-radius:9px; color:#69778d; background:#fff; font-size:9px; line-height:1.55; }
+    .campaign-import-preview[hidden] { display:none; }
     .campaign-leads-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:18px 0 10px; }
     .campaign-leads-head h3 { margin:0; color:#34435a; font-size:13px; }
     .campaign-lead-list { display:grid; gap:11px; }
@@ -794,6 +802,15 @@ CAMPAIGNS_PAGE = """<!doctype html>
           <button class="btn-primary" type="submit">Find businesses</button>
         </form>
         <p class="campaign-footnote">Source: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a> · ODbL. Search by business area, not a person's address. The business type and location are sent to public map services only when you search. See the <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noopener noreferrer">Nominatim usage policy</a>.</p>
+        <div class="campaign-import">
+          <h3>Bring in a business list</h3>
+          <p>Import a CSV from your own research or provider export. Preview rows before adding them; a website or source link is required.</p>
+          <form class="campaign-import-form" id="campaignCsvPreviewForm">
+            <label>Choose a CSV file<input name="file" type="file" accept=".csv,text/csv" required></label>
+            <div class="campaign-lead-actions"><button type="submit">Preview CSV</button><button class="approve-button" type="button" id="importCampaignCsv" hidden disabled>Import previewed rows</button></div>
+          </form>
+          <div class="campaign-import-preview" id="campaignCsvPreview" role="status" aria-live="polite" hidden></div>
+        </div>
       </section>
       <aside class="campaign-privacy"><strong>Review before contact</strong><br>Without an AI key, the app creates a basic template locally. With a configured AI key, drafting sends your campaign brief and selected business listing fields (name, type, area and website) to that provider; saved contact names, email addresses and phone numbers are excluded. Do not put confidential or personal data in the brief. AI drafting may incur provider charges. No messages are sent from this page; approval only marks a draft ready for you to copy or export.</aside>
       <section class="panel campaign-panel">
@@ -814,6 +831,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
     const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     let currentCampaign = null;
     let savedBusinesses = [];
+    let csvPreview = null;
     function node(tag, className, value) {
       const item = document.createElement(tag);
       if (className) item.className = className;
@@ -835,6 +853,28 @@ CAMPAIGNS_PAGE = """<!doctype html>
         throw new Error(data.detail || "The request could not be completed.");
       }
       return response.json();
+    }
+    async function uploadCsv(path, file) {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      const response = await fetch(path, {
+        method:"POST", credentials:"same-origin",
+        headers:{"Accept":"application/json", "X-CSRF-Token":csrfToken}, body:form
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(function(){ return {}; });
+        throw new Error(data.detail || "The CSV could not be processed.");
+      }
+      return response.json();
+    }
+    function clearCsvPreview() {
+      csvPreview = null;
+      const form = document.getElementById("campaignCsvPreviewForm");
+      const box = document.getElementById("campaignCsvPreview");
+      const button = document.getElementById("importCampaignCsv");
+      if (form) form.reset();
+      if (box) { box.replaceChildren(); box.hidden = true; }
+      if (button) { button.hidden = true; button.disabled = true; }
     }
     function safeLink(url, label) {
       if (!url) return null;
@@ -940,6 +980,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
     async function openCampaign(id) {
       try {
         currentCampaign = await api("/api/campaigns/" + id, "GET");
+        clearCsvPreview();
         document.getElementById("campaignListView").hidden = true;
         document.getElementById("campaignWorkspace").hidden = false;
         document.getElementById("workspaceTitle").textContent = currentCampaign.title;
@@ -957,7 +998,8 @@ CAMPAIGNS_PAGE = """<!doctype html>
       list.replaceChildren();
       document.getElementById("leadHeading").textContent = campaign.title + " businesses";
       const counts = campaign.draft_counts || {};
-      document.getElementById("leadCounts").textContent = campaign.lead_count + " businesses · " + (counts.needs_review || 0) + " drafts to review · " + (counts.approved || 0) + " approved";
+      const pipeline = campaign.pipeline_counts || {};
+      document.getElementById("leadCounts").textContent = campaign.lead_count + " businesses · " + (counts.needs_review || 0) + " drafts to review · " + (pipeline.interested || 0) + " interested · " + (pipeline.meeting || 0) + " meetings · " + (pipeline.proposal || 0) + " proposals · " + (pipeline.won || 0) + " won";
       if (!campaign.leads.length) {
         list.appendChild(node("div", "campaign-empty", "No businesses in this campaign yet. Use the search above or save businesses with your connected prospecting skill."));
         return;
@@ -986,7 +1028,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
         card.appendChild(fit);
         if (source) card.appendChild(source);
         const stage = document.createElement("select");
-        [["new","New"],["contacted","Contacted"],["replied","Replied"],["won","Won"],["lost","Lost"]].forEach(function(pair){
+        [["new","New"],["contacted","Contacted"],["replied","Replied"],["interested","Interested"],["meeting","Meeting"],["proposal","Proposal"],["won","Won"],["lost","Lost"]].forEach(function(pair){
           const option = node("option", "", pair[1]);
           option.value = pair[0];
           stage.appendChild(option);
@@ -994,6 +1036,35 @@ CAMPAIGNS_PAGE = """<!doctype html>
         stage.value = lead.pipeline_stage || "new";
         const stageLabel = node("label", "campaign-editor-label", "Campaign stage");
         stageLabel.appendChild(stage);
+        const followUp = document.createElement("input");
+        followUp.type = "date";
+        followUp.value = lead.follow_up_date || "";
+        const followUpLabel = node("label", "campaign-editor-label", "Next follow-up date");
+        followUpLabel.appendChild(followUp);
+        const dealValue = document.createElement("input");
+        dealValue.type = "number";
+        dealValue.min = "0";
+        dealValue.max = "1000000000";
+        dealValue.step = "1";
+        dealValue.value = lead.deal_value === null || lead.deal_value === undefined ? "" : String(lead.deal_value);
+        dealValue.placeholder = "Optional whole amount";
+        const dealValueLabel = node("label", "campaign-editor-label", "Potential deal value (local currency)");
+        dealValueLabel.appendChild(dealValue);
+        const lostReason = document.createElement("select");
+        [["", "Choose a reason if lost"], ["not_interested", "Not interested"], ["later", "Later"], ["wrong_number", "Wrong contact details"], ["competitor", "Competitor"], ["price", "Price"], ["no_reply", "No reply"], ["other", "Other"]].forEach(function(pair){
+          const option = node("option", "", pair[1]);
+          option.value = pair[0];
+          lostReason.appendChild(option);
+        });
+        lostReason.value = lead.lost_reason || "";
+        const lostReasonLabel = node("label", "campaign-editor-label", "Lost reason");
+        lostReasonLabel.appendChild(lostReason);
+        const notes = document.createElement("textarea");
+        notes.maxLength = 3000;
+        notes.value = lead.campaign_notes || "";
+        notes.placeholder = "Private notes for this campaign lead.";
+        const notesLabel = node("label", "campaign-editor-label", "Campaign notes");
+        notesLabel.appendChild(notes);
         const subject = document.createElement("input");
         subject.maxLength = 240;
         subject.value = lead.draft_subject || "";
@@ -1006,7 +1077,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
         body.placeholder = "Generate a draft, then edit it here before approving or copying.";
         const bodyLabel = node("label", "campaign-editor-label", "Review and edit draft");
         bodyLabel.appendChild(body);
-        card.append(stageLabel, subjectLabel, bodyLabel);
+        card.append(stageLabel, followUpLabel, dealValueLabel, lostReasonLabel, notesLabel, subjectLabel, bodyLabel);
         const actions = node("div", "campaign-lead-actions", "");
         function action(label, className, handler) {
           const button = node("button", className || "", label);
@@ -1016,7 +1087,12 @@ CAMPAIGNS_PAGE = """<!doctype html>
         }
         async function updateDraft(statusValue) {
           try {
-            const payload = {draft_subject:subject.value, draft_body:body.value, pipeline_stage:stage.value};
+            const payload = {
+              draft_subject:subject.value, draft_body:body.value, pipeline_stage:stage.value,
+              campaign_notes:notes.value, follow_up_date:followUp.value || null,
+              deal_value:dealValue.value === "" ? null : Number(dealValue.value),
+              lost_reason:lostReason.value || null
+            };
             if (statusValue) payload.draft_status = statusValue;
             await api("/api/campaigns/" + campaign.id + "/leads/" + lead.id, "PATCH", payload);
             showNotice(statusValue === "approved" ? "Draft marked approved. It has not been sent." : statusValue === "rejected" ? "Draft rejected." : "Draft saved for review.", false);
@@ -1108,10 +1184,63 @@ CAMPAIGNS_PAGE = """<!doctype html>
         const result = await api("/api/campaigns/" + currentCampaign.id + "/discover", "POST", data);
         showNotice("Found " + result.found + " listings; added " + result.added_to_campaign + " to this campaign. " + (result.notice ? result.notice + " " : "") + result.attribution + " · " + result.license + ".", false);
         currentCampaign = result.campaign;
+        clearCsvPreview();
         renderLeads(currentCampaign);
         await loadCampaigns();
       } catch (error) { showNotice(error.message, true); }
       finally { button.disabled = false; button.textContent = "Find businesses"; }
+    });
+    const csvForm = document.getElementById("campaignCsvPreviewForm");
+    const csvPreviewBox = document.getElementById("campaignCsvPreview");
+    const importCsvButton = document.getElementById("importCampaignCsv");
+    csvForm.elements.file.addEventListener("change", function() {
+      csvPreview = null;
+      csvPreviewBox.replaceChildren();
+      csvPreviewBox.hidden = true;
+      importCsvButton.hidden = true;
+      importCsvButton.disabled = true;
+    });
+    csvForm.addEventListener("submit", async function(event) {
+      event.preventDefault();
+      if (!currentCampaign) return;
+      const file = csvForm.elements.file.files[0];
+      if (!file) { showNotice("Choose a CSV file first.", true); return; }
+      const button = csvForm.querySelector('button[type="submit"]');
+      button.disabled = true;
+      button.textContent = "Checking rows…";
+      try {
+        const preview = await uploadCsv("/api/campaigns/" + currentCampaign.id + "/import-csv/preview", file);
+        csvPreview = {file:file, validRows:preview.valid_rows, willAdd:preview.will_add};
+        csvPreviewBox.replaceChildren();
+        csvPreviewBox.appendChild(node("strong", "", preview.will_add + " rows ready to add"));
+        csvPreviewBox.appendChild(node("div", "", preview.invalid_rows + " invalid rows and " + preview.duplicate_rows + " repeated rows will be skipped. Nothing has been saved yet."));
+        if (preview.sample_names.length) {
+          const list = document.createElement("ul");
+          list.className = "simulation-timeline";
+          preview.sample_names.forEach(function(name){ list.appendChild(node("li", "", name)); });
+          csvPreviewBox.appendChild(list);
+        }
+        csvPreviewBox.hidden = false;
+        importCsvButton.hidden = preview.will_add < 1;
+        importCsvButton.disabled = preview.will_add < 1;
+        showNotice(preview.will_add ? "CSV preview is ready. Check the row counts, then choose Import previewed rows." : "No new rows to add. Check the missing source links or existing campaign records.", !preview.will_add);
+      } catch (error) { showNotice(error.message, true); }
+      finally { button.disabled = false; button.textContent = "Preview CSV"; }
+    });
+    importCsvButton.addEventListener("click", async function() {
+      if (!currentCampaign || !csvPreview || csvPreview.willAdd < 1) return;
+      if (!window.confirm("Add " + csvPreview.willAdd + " businesses from this CSV to the current campaign?")) return;
+      importCsvButton.disabled = true;
+      importCsvButton.textContent = "Importing…";
+      try {
+        const result = await uploadCsv("/api/campaigns/" + currentCampaign.id + "/import-csv", csvPreview.file);
+        currentCampaign = result.campaign;
+        clearCsvPreview();
+        renderLeads(currentCampaign);
+        await loadCampaigns();
+        showNotice("Added " + result.added_to_campaign + " businesses. " + result.already_in_campaign + " were already linked; " + (result.invalid_rows + result.duplicate_rows) + " rows were skipped. No message was sent.", false);
+      } catch (error) { showNotice(error.message, true); }
+      finally { importCsvButton.disabled = false; importCsvButton.textContent = "Import previewed rows"; }
     });
     document.getElementById("savedBusinessFilter").addEventListener("input", renderSavedBusinesses);
     document.getElementById("addSavedBusinesses").addEventListener("click", async function() {
@@ -1122,6 +1251,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
       if (ids.length > 50) { showNotice("Choose up to 50 businesses at a time.", true); return; }
       try {
         currentCampaign = await api("/api/campaigns/" + currentCampaign.id + "/leads", "POST", {prospect_ids:ids});
+        clearCsvPreview();
         showNotice("Added " + ids.length + " saved business selection(s) to this campaign.", false);
         renderLeads(currentCampaign);
         await loadCampaigns();
