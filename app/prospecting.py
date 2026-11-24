@@ -29,6 +29,33 @@ _AMENITY_BUSINESSES = {
     "school", "veterinary", "coworking_space", "language_school", "college",
 }
 _GENERIC_TYPE_WORDS = {"business", "businesses", "company", "companies", "service", "services", "near", "local"}
+_EUROPE_COUNTRY_CODES = {
+    "ad", "al", "at", "ba", "be", "bg", "by", "ch", "cy", "cz", "de", "dk", "ee",
+    "es", "fi", "fr", "gb", "ge", "gr", "hr", "hu", "ie", "is", "it", "li", "lt",
+    "lu", "lv", "mc", "md", "me", "mk", "mt", "nl", "no", "pl", "pt", "ro", "rs",
+    "ru", "se", "si", "sk", "sm", "tr", "ua", "va", "xk",
+}
+_TYPE_TAG_KEYS = {
+    "aesthetic": {"shop", "healthcare", "amenity", "beauty"},
+    "aesthetics": {"shop", "healthcare", "amenity", "beauty"},
+    "beauty": {"shop", "beauty"},
+    "clinic": {"healthcare", "amenity"},
+    "cosmetic": {"shop", "healthcare", "beauty"},
+    "cosmetics": {"shop", "beauty"},
+    "dental": {"healthcare", "amenity"},
+    "dentist": {"healthcare", "amenity"},
+    "dentistry": {"healthcare", "amenity"},
+    "salon": {"shop", "beauty"},
+    "hairdresser": {"shop"},
+    "cafe": {"amenity"},
+    "restaurant": {"amenity"},
+    "bank": {"amenity"},
+    "pharmacy": {"amenity", "healthcare"},
+    "doctor": {"amenity", "healthcare"},
+    "doctors": {"amenity", "healthcare"},
+    "veterinary": {"amenity", "healthcare"},
+    "school": {"amenity"},
+}
 _TYPE_SYNONYMS = {
     "aesthetic": {"beauty", "clinic", "cosmetics"},
     "aesthetics": {"beauty", "clinic", "cosmetics"},
@@ -90,7 +117,7 @@ def _geocode(location: str):
         if wait > 0:
             time.sleep(wait)
         _LAST_NOMINATIM_REQUEST = time.monotonic()
-        results = _fetch_json(request, timeout=20)
+        results = _fetch_json(request, timeout=20, service="OpenStreetMap place lookup")
     if not isinstance(results, list) or not results:
         raise ProspectingError("We couldn't find that place. Try a city, town, or postcode.", 404)
     try:
@@ -113,32 +140,59 @@ def _geocode(location: str):
         "city": locality,
         "region": address.get("state", ""),
         "country": address.get("country", ""),
+        "country_code": (address.get("country_code") or "").lower(),
     }
 
 
-def _overpass_businesses(place: dict, radius_m: int):
+def _overpass_endpoint(place: dict):
+    configured = os.getenv("OSM_OVERPASS_URL", "").strip()
+    if configured:
+        return _https_endpoint(configured, "")
+    if place.get("country_code", "").lower() in _EUROPE_COUNTRY_CODES:
+        # The DResel Europe endpoint is a small, fair-use public instance. It
+        # responds more reliably for user-sized searches than the overloaded
+        # main instance, and is capped to four parallel queries per IP.
+        return "https://ovp.dresel.systems/api/interpreter"
+    # Private.coffee operates a global endpoint and explicitly permits
+    # commercial projects, subject to fair use and its current terms.
+    return "https://overpass.private.coffee/api/interpreter"
+
+
+def _overpass_businesses(place: dict, radius_m: int, business_type: str = ""):
     endpoint = _https_endpoint(
-        os.getenv("OSM_OVERPASS_URL", ""),
-        "https://overpass-api.de/api/interpreter",
+        _overpass_endpoint(place),
+        "https://overpass.private.coffee/api/interpreter",
     )
     location = f"{place['lat']:.6f},{place['lon']:.6f}"
-    selectors = [
-        f'nwr(around:{radius_m},{location})["name"]["{key}"];'
-        for key in _BUSINESS_KEYS
-    ]
-    selectors.append(
-        f'nwr(around:{radius_m},{location})["name"]["amenity"~"^('
-        + "|".join(sorted(_AMENITY_BUSINESSES))
-        + ')$"];'
-    )
-    query = "[out:json][timeout:25];(" + "".join(selectors) + ");out center 160;"
+    terms = _type_terms(business_type)
+    if terms:
+        pattern = "|".join(re.escape(term) for term in sorted(terms))
+        tag_keys = set().union(*(_TYPE_TAG_KEYS.get(term, set()) for term in terms))
+        if not tag_keys:
+            tag_keys = set(_BUSINESS_KEYS)
+        selectors = [f'nwr(around:{radius_m},{location})["name"~"{pattern}",i];']
+        selectors.extend(
+            f'nwr(around:{radius_m},{location})["name"]["{key}"~"{pattern}",i];'
+            for key in sorted(tag_keys)
+        )
+    else:
+        selectors = [
+            f'nwr(around:{radius_m},{location})["name"]["{key}"];'
+            for key in _BUSINESS_KEYS
+        ]
+        selectors.append(
+            f'nwr(around:{radius_m},{location})["name"]["amenity"~"^('
+            + "|".join(sorted(_AMENITY_BUSINESSES))
+            + ')$"];'
+        )
+    query = "[out:json][timeout:15];(" + "".join(selectors) + ");out center 60;"
     request = Request(
         endpoint,
         data=urlencode({"data": query}).encode("utf-8"),
         headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "User-Agent": _user_agent()},
         method="POST",
     )
-    data = _fetch_json(request, timeout=40)
+    data = _fetch_json(request, timeout=20, service="OpenStreetMap business search")
     elements = data.get("elements", []) if isinstance(data, dict) else []
     if not isinstance(elements, list):
         raise ProspectingError("The map service returned an unsupported search result.", 502)
@@ -153,7 +207,10 @@ def _overpass_businesses(place: dict, radius_m: int):
         if amenity in _AMENITY_BUSINESSES:
             categories["amenity"] = amenity.replace("_", " ")
         if not categories:
-            continue
+            if terms and re.search(pattern, name, re.IGNORECASE):
+                categories["name"] = "search term match"
+            else:
+                continue
         center = element.get("center") or element
         try:
             lat = float(center.get("lat"))
@@ -206,7 +263,17 @@ def discover_openstreetmap_businesses(business_type: str, location: str, radius_
         if cached and cached[0] > now:
             return json.loads(json.dumps(cached[1]))
     place = _geocode(location)
-    businesses = _overpass_businesses(place, radius_m)
+    notice = ""
+    try:
+        businesses = _overpass_businesses(place, radius_m, business_type)
+    except ProspectingError as exc:
+        if exc.status_code != 503 or radius_m <= 1000:
+            raise
+        # Public Overpass instances can reject large-radius queries under load.
+        # Retry once with a small radius so the user still gets a working search.
+        radius_m = 1000
+        notice = "The public map service was busy, so this search used a 1 km radius. Try again later for a wider search."
+        businesses = _overpass_businesses(place, radius_m, business_type)
     terms = _type_terms(business_type)
     for item in businesses:
         searchable = (item["business_name"] + " " + item["_category_text"]).lower()
@@ -230,6 +297,7 @@ def discover_openstreetmap_businesses(business_type: str, location: str, radius_
         "location_label": place["label"],
         "search_area": place["city"],
         "radius_m": radius_m,
+        "notice": notice,
         "results": businesses,
         "attribution": "© OpenStreetMap contributors",
         "license": "Open Database License (ODbL)",

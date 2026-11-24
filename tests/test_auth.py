@@ -24,6 +24,7 @@ os.environ["APP_API_TOKEN_HASH"] = hash_api_token(TOKEN)
 from fastapi.testclient import TestClient
 from app.database import Automation, Campaign, CampaignProspect, Prospect, SessionLocal
 from app.main import app, AUTH_CONFIG
+from app.prospecting import ProspectingError, discover_openstreetmap_businesses
 from app.security import get_session_csrf_token
 
 FAKE_AI = {"category": "sales", "priority": "medium", "lead_score": 42, "reply": "Synthetic test reply."}
@@ -166,6 +167,23 @@ class AuthenticationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         discover.assert_called_once_with("Aesthetic clinic", "Birmingham, United Kingdom", 5000, limit=40)
+
+    def test_openstreetmap_retries_a_busy_wide_search_at_one_kilometre(self):
+        place = {
+            "lat": 52.49, "lon": -1.85, "label": "Birmingham", "city": "Birmingham",
+            "region": "West Midlands", "country": "United Kingdom", "country_code": "gb",
+        }
+        with patch("app.prospecting._geocode", return_value=place), patch(
+            "app.prospecting._overpass_businesses",
+            side_effect=[ProspectingError("busy", 503), []],
+        ) as search:
+            result = discover_openstreetmap_businesses(
+                "Aesthetic clinic", "Birmingham fallback test", 5000, 40
+            )
+
+        self.assertEqual(result["radius_m"], 1000)
+        self.assertIn("used a 1 km radius", result["notice"])
+        self.assertEqual([call.args[1] for call in search.call_args_list], [5000, 1000])
 
     def test_business_skill_documents_tool_costs_and_safe_api_use(self):
         root = Path(__file__).resolve().parents[1] / "skills" / "business-prospect-finder"

@@ -764,7 +764,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
         <form class="campaign-discovery" id="campaignDiscoveryForm">
           <label>Business type<input name="business_type" maxlength="120" required placeholder="Aesthetic clinic"></label>
           <label>City, town or postcode<input name="location" maxlength="120" required placeholder="Birmingham or B1"></label>
-          <label>Search radius<select name="radius_m"><option value="1000">1 km</option><option value="3000">3 km</option><option value="5000" selected>5 km</option><option value="10000">10 km</option></select></label>
+          <label>Search radius<select name="radius_m"><option value="1000" selected>1 km</option><option value="3000">3 km</option><option value="5000">5 km</option><option value="10000">10 km</option></select></label>
           <button class="btn-primary" type="submit">Find businesses</button>
         </form>
         <p class="campaign-footnote">Source: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a> · ODbL. Search by business area, not a person's address. The business type and location are sent to public map services only when you search. See the <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noopener noreferrer">Nominatim usage policy</a>.</p>
@@ -996,7 +996,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
       button.textContent = "Searching…";
       try {
         const result = await api("/api/campaigns/" + currentCampaign.id + "/discover", "POST", data);
-        showNotice("Found " + result.found + " listings; added " + result.added_to_campaign + " to this campaign. " + result.attribution + " · " + result.license + ".", false);
+        showNotice("Found " + result.found + " listings; added " + result.added_to_campaign + " to this campaign. " + (result.notice ? result.notice + " " : "") + result.attribution + " · " + result.license + ".", false);
         currentCampaign = result.campaign;
         renderLeads(currentCampaign);
         await loadCampaigns();
