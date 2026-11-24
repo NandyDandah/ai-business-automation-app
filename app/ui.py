@@ -813,7 +813,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
     function safeLink(url, label) {
       if (!url) return null;
       try {
-        const normalized = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : "https://" + url;
+        const normalized = /^[a-z][a-z0-9+.-]*:\\/\\//i.test(url) ? url : "https://" + url;
         const parsed = new URL(normalized);
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
         const link = node("a", "campaign-lead-link", label || url);

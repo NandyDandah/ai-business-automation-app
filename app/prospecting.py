@@ -328,7 +328,6 @@ def draft_outreach_messages(campaign: dict, businesses: list[dict]):
     )
     try:
         response = _fetch_json(request, timeout=50, service="AI drafting provider")
-    try:
         content = response["choices"][0]["message"]["content"]
         parsed = json.loads(content)
         drafts = parsed["drafts"]
