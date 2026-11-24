@@ -723,8 +723,23 @@ CAMPAIGNS_PAGE = """<!doctype html>
     .campaign-alert.visible { display:block; }
     .campaign-alert.error { border-color:#f0d0cb; color:#984a43; background:#fff6f4; }
     .campaign-footnote { margin:10px 0 0; color:#98a2b0; font-size:8px; line-height:1.5; }
+    .business-simulation { margin-top:13px; padding:14px; border:1px solid #e2e8f0; border-radius:12px; background:linear-gradient(145deg,#fbfcff,#f8fbf8); }
+    .business-simulation[hidden] { display:none; }
+    .simulation-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:11px; }
+    .simulation-head h5 { margin:0; color:#34435a; font-size:11px; }
+    .simulation-head p { margin:3px 0 0; color:#8591a3; font-size:9px; }
+    .simulation-score { display:grid; min-width:48px; height:42px; place-items:center; padding:0 8px; border:1px solid #d7e8ce; border-radius:10px; color:#4f7452; background:#f4faef; font-size:13px; font-weight:750; }
+    .simulation-breakdown { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+    .simulation-score-row { padding:9px; border:1px solid #e8edf2; border-radius:9px; background:#fff; }
+    .simulation-score-label { display:flex; justify-content:space-between; gap:8px; color:#637188; font-size:9px; font-weight:700; }
+    .simulation-track { overflow:hidden; height:5px; margin:6px 0; border-radius:99px; background:#eef1f5; }
+    .simulation-track span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#86c99b,#a6d77a); }
+    .simulation-score-row p { margin:0; color:#8a96a6; font-size:8px; line-height:1.45; }
+    .simulation-draft { display:grid; gap:6px; margin-top:11px; color:#627088; font-size:9px; font-weight:700; }
+    .simulation-draft textarea { width:100%; min-height:104px; padding:10px; border:1px solid #e1e7ef; border-radius:9px; color:#536178; background:#fff; font:inherit; font-size:9px; line-height:1.55; resize:vertical; }
+    .simulation-timeline { display:grid; gap:6px; margin:10px 0 0; padding-left:18px; color:#7e8a9b; font-size:8px; line-height:1.5; }
     @media(max-width:900px) { .campaign-grid,.campaign-tools { grid-template-columns:1fr; } }
-    @media(max-width:620px) { .campaign-row,.campaign-discovery { grid-template-columns:1fr; } .campaign-workspace-head,.campaign-leads-head { align-items:stretch; flex-direction:column; } .campaign-list-card { align-items:flex-start; flex-direction:column; } }
+    @media(max-width:620px) { .campaign-row,.campaign-discovery,.simulation-breakdown { grid-template-columns:1fr; } .campaign-workspace-head,.campaign-leads-head { align-items:stretch; flex-direction:column; } .campaign-list-card { align-items:flex-start; flex-direction:column; } }
   </style>
 </head>
 <body>
@@ -971,6 +986,58 @@ CAMPAIGNS_PAGE = """<!doctype html>
           catch (error) { showNotice(error.message, true); }
         });
         card.appendChild(actions);
+        const simulation = node("section", "business-simulation", "");
+        simulation.hidden = true;
+        async function runSimulation(button) {
+          button.disabled = true;
+          const oldLabel = button.textContent;
+          button.textContent = "Simulating…";
+          try {
+            const result = await api("/api/campaigns/" + campaign.id + "/leads/" + lead.id + "/simulate", "POST", {});
+            simulation.replaceChildren();
+            const head = node("div", "simulation-head", "");
+            const copy = node("div", "", "");
+            copy.appendChild(node("h5", "", "One-business simulation · " + result.business.name));
+            copy.appendChild(node("p", "", result.fit.band + " · " + result.draft_mode + " draft preview"));
+            head.append(copy, node("span", "simulation-score", result.fit.score + "/100"));
+            simulation.appendChild(head);
+            const breakdown = node("div", "simulation-breakdown", "");
+            result.fit.components.forEach(function(component) {
+              const row = node("div", "simulation-score-row", "");
+              const label = node("div", "simulation-score-label", "");
+              label.append(node("span", "", component.name), node("span", "", component.score + "/100"));
+              const track = node("div", "simulation-track", "");
+              const fill = node("span", "", "");
+              fill.style.width = Math.max(0, Math.min(100, Number(component.score) || 0)) + "%";
+              track.appendChild(fill);
+              row.append(label, track, node("p", "", component.evidence));
+              breakdown.appendChild(row);
+            });
+            simulation.appendChild(breakdown);
+            const draft = document.createElement("label");
+            draft.className = "simulation-draft";
+            draft.appendChild(document.createTextNode("Unsent draft preview — " + (result.draft.subject || "No subject")));
+            const preview = document.createElement("textarea");
+            preview.readOnly = true;
+            preview.value = result.draft.body || "";
+            draft.appendChild(preview);
+            simulation.appendChild(draft);
+            const timeline = document.createElement("ol");
+            timeline.className = "simulation-timeline";
+            result.timeline.forEach(function(step) {
+              const item = document.createElement("li");
+              item.textContent = step.when + " — " + step.action;
+              timeline.appendChild(item);
+            });
+            simulation.appendChild(timeline);
+            simulation.appendChild(node("p", "campaign-footnote", result.fit.method + " " + result.note));
+            simulation.hidden = false;
+            showNotice("Simulation complete. The draft was not saved or sent.", false);
+          } catch (error) { showNotice(error.message, true); }
+          finally { button.disabled = false; button.textContent = oldLabel; }
+        }
+        action("Simulate one business", "", function(event){ runSimulation(event.currentTarget); });
+        card.appendChild(simulation);
         list.appendChild(card);
       });
     }

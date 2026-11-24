@@ -25,6 +25,7 @@ from app.database import (
 )
 from app.ai_service import AIProviderError, analyse_business_message
 from app.prospecting import ProspectingError, discover_openstreetmap_businesses, draft_outreach_messages
+from app.simulation import one_business_timeline, simulate_business_fit
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
     create_public_form_csrf, get_session_csrf_token, load_auth_config, verify_api_token,
@@ -1092,6 +1093,76 @@ def generate_campaign_drafts(
         campaign_lead.reviewed_at = None
     db.commit()
     return _campaign_detail(db, campaign)
+
+
+@app.post("/api/campaigns/{campaign_id}/leads/{prospect_id}/simulate")
+def simulate_campaign_business(campaign_id: int, prospect_id: int, db: Session = Depends(get_db)):
+    """Run the source-inspired single-business workflow without saving or sending anything."""
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if not campaign.offer.strip():
+        raise HTTPException(status_code=422, detail="Add your offer to the campaign brief before simulating")
+    joined = (
+        db.query(CampaignProspect, Prospect)
+        .join(Prospect, Prospect.id == CampaignProspect.prospect_id)
+        .filter(
+            CampaignProspect.campaign_id == campaign_id,
+            CampaignProspect.prospect_id == prospect_id,
+        )
+        .first()
+    )
+    if not joined:
+        raise HTTPException(status_code=404, detail="Business is not in this campaign")
+    campaign_lead, prospect = joined
+    business = {
+        "id": prospect.id,
+        "business_name": prospect.business_name,
+        "industry": prospect.industry or "",
+        "business_type": prospect.business_type or "",
+        "city": prospect.city or "",
+        "region": prospect.region or "",
+        "country": prospect.country or "",
+        "website": prospect.website or "",
+        "source_url": prospect.source_url or "",
+        "business_email": prospect.business_email or "",
+        "business_phone": prospect.business_phone or "",
+    }
+    campaign_info = {
+        "title": campaign.title,
+        "industry": campaign.industry or "",
+        "business_type": campaign.business_type or "",
+        "offer": campaign.offer,
+        "proof": campaign.proof or "",
+        "tone": campaign.tone or "Professional",
+        "language": campaign.language or "English",
+    }
+    fit = simulate_business_fit(campaign_info, business)
+    safe_business = {
+        key: business[key]
+        for key in ("id", "business_name", "industry", "business_type", "city", "region", "country", "website")
+    }
+    try:
+        drafts = draft_outreach_messages(campaign_info, [safe_business])
+    except ProspectingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    draft = drafts[0]
+    return {
+        "business": {
+            "id": prospect.id,
+            "name": prospect.business_name,
+            "business_type": prospect.business_type or "",
+            "area": ", ".join(value for value in (prospect.city, prospect.region, prospect.country) if value),
+            "source_url": prospect.source_url,
+        },
+        "fit": fit,
+        "draft": {"subject": draft["subject"], "body": draft["body"], "reason": draft["reason"]},
+        "draft_mode": "AI provider" if os.getenv("OPENAI_API_KEY", "").strip() else "local template",
+        "timeline": one_business_timeline(campaign_lead.pipeline_stage),
+        "saved": False,
+        "sent": False,
+        "note": "Simulation only. The preview is not saved, approved, scheduled, or sent.",
+    }
 
 
 @app.patch("/api/campaigns/{campaign_id}/leads/{prospect_id}")

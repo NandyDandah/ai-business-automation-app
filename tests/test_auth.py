@@ -185,6 +185,59 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn("used a 1 km radius", result["notice"])
         self.assertEqual([call.args[1] for call in search.call_args_list], [5000, 1000])
 
+    def test_one_business_simulation_is_authenticated_safe_and_does_not_write(self):
+        with SessionLocal() as db:
+            campaign = Campaign(
+                title="UK dental website pilot", industry="Healthcare", business_type="Dental practice",
+                region="West Midlands", country="United Kingdom", offer="Website and booking improvements for dental practices.",
+            )
+            prospect = Prospect(
+                business_name="Demo Dental Practice", industry="Healthcare", business_type="Dentist",
+                website="", city="Birmingham", region="West Midlands", country="England",
+                business_email="public@example.invalid", business_phone="+44 121 555 0100",
+                contact_name="Synthetic Contact", source_url="https://example.invalid/demo-listing",
+                fingerprint="one-business-simulation-test",
+            )
+            db.add_all([campaign, prospect])
+            db.commit()
+            link = CampaignProspect(
+                campaign_id=campaign.id, prospect_id=prospect.id,
+                draft_subject="Existing draft", draft_body="Keep this draft unchanged.",
+                draft_status="needs_review", pipeline_stage="new",
+            )
+            db.add(link)
+            db.commit()
+            campaign_id, prospect_id = campaign.id, prospect.id
+
+        path = f"/api/campaigns/{campaign_id}/leads/{prospect_id}/simulate"
+        self.assertEqual(self.client.post(path, json={}).status_code, 401)
+        login(self.client)
+        with patch("app.main.draft_outreach_messages", return_value=[{
+            "business_id": prospect_id,
+            "subject": "A question about online bookings",
+            "body": "A synthetic review-only message.",
+            "reason": "Mock provider response for an isolated test.",
+        }]) as draft_call:
+            response = self.client.post(path, json={}, headers={"X-CSRF-Token": session_csrf(self.client)})
+
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(result["business"]["name"], "Demo Dental Practice")
+        self.assertEqual(result["draft"]["body"], "A synthetic review-only message.")
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["sent"])
+        self.assertTrue(result["timeline"])
+        sent_to_provider = draft_call.call_args.args[1][0]
+        self.assertNotIn("business_email", sent_to_provider)
+        self.assertNotIn("business_phone", sent_to_provider)
+        self.assertNotIn("contact_name", sent_to_provider)
+        with SessionLocal() as db:
+            unchanged = db.query(CampaignProspect).filter_by(
+                campaign_id=campaign_id, prospect_id=prospect_id
+            ).one()
+            self.assertEqual(unchanged.draft_body, "Keep this draft unchanged.")
+            self.assertEqual(unchanged.draft_status, "needs_review")
+
     def test_business_skill_documents_tool_costs_and_safe_api_use(self):
         root = Path(__file__).resolve().parents[1] / "skills" / "business-prospect-finder"
         skill = (root / "SKILL.md").read_text(encoding="utf-8")
