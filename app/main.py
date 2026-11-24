@@ -1,8 +1,10 @@
 import csv
 import hmac
 import os
+import re
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timedelta
 from html import escape as escape_html
 from threading import Lock
 from typing import Literal, Optional
@@ -18,15 +20,16 @@ from sqlalchemy.orm import Session
 
 load_dotenv()
 
-from app.database import SessionLocal, Automation, Prospect, create_tables
+from app.database import SessionLocal, Automation, HomeownerInquiry, Prospect, create_tables
 from app.ai_service import analyse_business_message
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
-    get_session_csrf_token, load_auth_config, verify_api_token, verify_login_csrf, verify_password,
+    create_public_form_csrf, get_session_csrf_token, load_auth_config, verify_api_token,
+    verify_login_csrf, verify_password, verify_public_form_csrf,
 )
 from app.ui import (
-    BUSINESS_DATABASE_PAGE, DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE,
-    build_login_page, build_protected_page,
+    BUSINESS_DATABASE_PAGE, DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE, RETROFIT_INQUIRIES_PAGE,
+    build_login_page, build_protected_page, build_public_retrofit_page, build_retrofit_thanks_page,
 )
 
 AUTH_CONFIG = load_auth_config()
@@ -36,7 +39,49 @@ app = FastAPI(title="AI Business Automation App")
 
 _LOGIN_ATTEMPTS = defaultdict(deque)
 _LOGIN_LOCK = Lock()
+_PUBLIC_INQUIRY_ATTEMPTS = defaultdict(deque)
+_PUBLIC_INQUIRY_LOCK = Lock()
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+_PUBLIC_PATHS = {"/login", "/retrofit"}
+_PUBLIC_POST_PATHS = {"/retrofit/enquiries"}
+
+
+def _retrofit_config():
+    """Require explicit ownership, notice, contact, and retention settings."""
+    requested = os.getenv("PUBLIC_ENQUIRY_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+    controller = os.getenv("PUBLIC_ENQUIRY_CONTROLLER_NAME", "").strip()
+    contact_email = os.getenv("PUBLIC_ENQUIRY_CONTACT_EMAIL", "").strip()
+    privacy_url = os.getenv("PUBLIC_ENQUIRY_PRIVACY_URL", "").strip()
+    try:
+        retention_days = int(os.getenv("PUBLIC_ENQUIRY_RETENTION_DAYS", "0"))
+    except ValueError:
+        retention_days = 0
+    email_ok = bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", contact_email))
+    parsed_privacy = urlparse(privacy_url)
+    privacy_ok = parsed_privacy.scheme == "https" and bool(parsed_privacy.netloc)
+    ready = requested and bool(controller) and email_ok and privacy_ok and 1 <= retention_days <= 365
+    return {
+        "enabled": ready,
+        "controller": controller,
+        "contact_email": contact_email,
+        "privacy_url": privacy_url,
+        "retention_days": retention_days,
+    }
+
+
+def _purge_expired_inquiries(db: Session):
+    deleted = db.query(HomeownerInquiry).filter(HomeownerInquiry.expires_at <= datetime.utcnow()).delete(synchronize_session=False)
+    if deleted:
+        db.commit()
+
+
+@app.on_event("startup")
+def purge_expired_inquiries_on_startup():
+    db = SessionLocal()
+    try:
+        _purge_expired_inquiries(db)
+    finally:
+        db.close()
 
 def _auth_method(request: Request):
     authorization = request.headers.get("authorization")
@@ -63,7 +108,7 @@ def _security_headers(response):
 
 @app.middleware("http")
 async def protect_routes(request: Request, call_next):
-    if request.url.path == "/login":
+    if request.url.path in _PUBLIC_PATHS or (request.url.path in _PUBLIC_POST_PATHS and request.method == "POST"):
         response = await call_next(request)
     else:
         method = _auth_method(request)
@@ -245,6 +290,11 @@ class BusinessEnrichmentInput(BaseModel):
     enrichment_source_url: Optional[str] = Field(default=None, max_length=1000)
 
 
+class HomeownerInquiryReview(BaseModel):
+    status: Literal["new", "reviewing", "qualified", "matched", "contacted", "survey_booked", "closed"]
+    matched_installer_id: Optional[int] = None
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -389,6 +439,204 @@ def pipeline(request: Request):
 def prospect_database(request: Request):
     return _protected_page(BUSINESS_DATABASE_PAGE, request)
 
+
+def _public_retrofit_response(message="", status_code=200):
+    settings = _retrofit_config()
+    token = create_public_form_csrf(AUTH_CONFIG)
+    response = HTMLResponse(
+        build_public_retrofit_page(
+            token, settings["enabled"], settings["controller"], settings["privacy_url"], message
+        ),
+        status_code=status_code,
+    )
+    response.set_cookie(
+        "public_enquiry_csrf", token, max_age=60 * 60, httponly=True,
+        secure=AUTH_CONFIG.cookie_secure, samesite="strict", path="/",
+    )
+    return response
+
+
+@app.get("/retrofit", response_class=HTMLResponse)
+def public_retrofit_form():
+    return _public_retrofit_response()
+
+
+@app.post("/retrofit/enquiries", response_class=HTMLResponse)
+def submit_retrofit_enquiry(
+    request: Request,
+    csrf_token: str = Form(default=""),
+    full_name: str = Form(default="", max_length=120),
+    email: str = Form(default="", max_length=320),
+    phone: str = Form(default="", max_length=40),
+    postcode: str = Form(default="", max_length=16),
+    property_type: str = Form(default="", max_length=40),
+    heating_type: str = Form(default="", max_length=40),
+    ownership: str = Form(default="", max_length=40),
+    timeframe: str = Form(default="", max_length=40),
+    consent_contact: bool = Form(default=False),
+    consent_share: bool = Form(default=False),
+    company: str = Form(default="", max_length=200),
+    db: Session = Depends(get_db),
+):
+    settings = _retrofit_config()
+    if not settings["enabled"]:
+        return _public_retrofit_response(status_code=503)
+    cookie = request.cookies.get("public_enquiry_csrf", "")
+    if not verify_public_form_csrf(cookie, csrf_token, AUTH_CONFIG):
+        return _public_retrofit_response("This form expired. Please review and submit it again.", 403)
+    # Hidden honeypot: silently accept automated spam without storing anything.
+    if company.strip():
+        return HTMLResponse(build_retrofit_thanks_page(settings["controller"], settings["contact_email"]))
+
+    full_name = " ".join(full_name.split())
+    email = email.strip().lower()
+    phone = phone.strip()
+    postcode = " ".join(postcode.upper().split())
+    phone_digits = re.sub(r"\D", "", phone)
+    allowed_values = {
+        "property_type": {"House", "Bungalow", "Flat", "Other", "Not sure"},
+        "heating_type": {"Gas", "Oil", "Electric", "LPG", "Solid fuel", "Other", "Not sure"},
+        "ownership": {"Owner occupier", "Landlord", "Buying the property", "Other"},
+        "timeframe": {"Just exploring", "Within 3 months", "3 to 6 months", "More than 6 months"},
+    }
+    values = {
+        "property_type": property_type,
+        "heating_type": heating_type,
+        "ownership": ownership,
+        "timeframe": timeframe,
+    }
+    valid_postcode = re.fullmatch(r"[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}", postcode)
+    valid_email = not email or re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email)
+    valid_phone = not phone or 7 <= len(phone_digits) <= 15
+    if (
+        len(full_name) < 2 or not valid_postcode or not valid_email or not valid_phone
+        or not (email or phone) or not consent_contact
+        or any(value not in allowed_values[key] for key, value in values.items())
+    ):
+        return _public_retrofit_response(
+            "Please check your name, UK postcode, contact details, answers, and required contact permission.", 400
+        )
+
+    identity = email or phone_digits
+    throttle_key = hmac.new(
+        AUTH_CONFIG.session_secret, identity.encode("utf-8"), "sha256"
+    ).hexdigest()
+    now = time.monotonic()
+    with _PUBLIC_INQUIRY_LOCK:
+        attempts = _PUBLIC_INQUIRY_ATTEMPTS[throttle_key]
+        while attempts and now - attempts[0] > 3600:
+            attempts.popleft()
+        if len(attempts) >= 3:
+            return _public_retrofit_response(
+                "We could not accept another request from these contact details just now. Please contact us directly if needed.",
+                429,
+            )
+        attempts.append(now)
+
+    created_at = datetime.utcnow()
+    record = HomeownerInquiry(
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        postcode=postcode,
+        property_type=property_type,
+        heating_type=heating_type,
+        ownership=ownership,
+        timeframe=timeframe,
+        consent_contact=True,
+        consent_share=bool(consent_share),
+        consent_version="retrofit-enquiry-v1",
+        consented_at=created_at,
+        created_at=created_at,
+        expires_at=created_at + timedelta(days=settings["retention_days"]),
+    )
+    db.add(record)
+    db.commit()
+    response = HTMLResponse(build_retrofit_thanks_page(settings["controller"], settings["contact_email"]))
+    response.delete_cookie("public_enquiry_csrf", path="/", httponly=True,
+                           secure=AUTH_CONFIG.cookie_secure, samesite="strict")
+    return response
+
+
+@app.get("/retrofit-inquiries", response_class=HTMLResponse)
+def retrofit_inquiry_review(request: Request):
+    return _protected_page(RETROFIT_INQUIRIES_PAGE, request)
+
+
+@app.get("/api/retrofit/inquiries")
+def list_retrofit_inquiries(db: Session = Depends(get_db)):
+    _purge_expired_inquiries(db)
+    records = db.query(HomeownerInquiry).order_by(HomeownerInquiry.created_at.desc()).limit(500).all()
+    return [
+        {
+            "id": item.id,
+            "full_name": item.full_name,
+            "email": item.email,
+            "phone": item.phone,
+            "postcode": item.postcode,
+            "property_type": item.property_type,
+            "heating_type": item.heating_type,
+            "ownership": item.ownership,
+            "timeframe": item.timeframe,
+            "consent_contact": item.consent_contact,
+            "consent_share": item.consent_share,
+            "consent_version": item.consent_version,
+            "consented_at": item.consented_at.isoformat() if item.consented_at else "",
+            "status": item.status,
+            "matched_installer_id": item.matched_installer_id,
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M UTC") if item.created_at else "",
+        }
+        for item in records
+    ]
+
+
+@app.get("/api/retrofit/installers")
+def list_retrofit_installer_candidates(db: Session = Depends(get_db)):
+    # Return business identity and service-area hints only; contact/enrichment fields stay private.
+    records = db.query(Prospect).order_by(Prospect.id.desc()).limit(500).all()
+    return [
+        {
+            "id": item.id,
+            "business_name": item.business_name,
+            "industry": item.industry or "",
+            "business_type": item.business_type or "",
+            "website": item.website or "",
+            "city": item.city or "",
+            "region": item.region or "",
+            "country": item.country or "",
+        }
+        for item in records
+    ]
+
+
+@app.patch("/api/retrofit/inquiries/{inquiry_id}")
+def update_retrofit_inquiry(
+    inquiry_id: int, payload: HomeownerInquiryReview, db: Session = Depends(get_db)
+):
+    item = db.query(HomeownerInquiry).filter(HomeownerInquiry.id == inquiry_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Enquiry not found")
+    if payload.matched_installer_id is not None:
+        if not item.consent_share:
+            raise HTTPException(status_code=409, detail="The homeowner did not approve sharing details with an installer")
+        if not db.query(Prospect.id).filter(Prospect.id == payload.matched_installer_id).first():
+            raise HTTPException(status_code=404, detail="Installer candidate not found")
+    item.status = payload.status
+    item.matched_installer_id = payload.matched_installer_id
+    db.commit()
+    return {"updated": True, "id": item.id, "status": item.status,
+            "matched_installer_id": item.matched_installer_id}
+
+
+@app.delete("/api/retrofit/inquiries/{inquiry_id}")
+def erase_retrofit_inquiry(inquiry_id: int, db: Session = Depends(get_db)):
+    item = db.query(HomeownerInquiry).filter(HomeownerInquiry.id == inquiry_id).first()
+    if not item:
+        return {"deleted": False}
+    db.delete(item)
+    db.commit()
+    return {"deleted": True}
+
 def _prospect_fingerprint(item: ProspectInput) -> str:
     website = item.website.strip()
     host = urlparse(website if "://" in website else "https://" + website).hostname or ""
@@ -518,5 +766,4 @@ def update_business_enrichment(
         setattr(record, field, value.strip() if value is not None else "")
     db.commit()
     return {"updated": True, "id": record.id, "enrichment_provider": record.enrichment_provider}
-
 

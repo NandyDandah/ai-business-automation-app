@@ -12,6 +12,7 @@ from dataclasses import dataclass
 PBKDF2_ITERATIONS = 600_000
 SESSION_MAX_AGE = 8 * 60 * 60
 LOGIN_CSRF_MAX_AGE = 15 * 60
+PUBLIC_FORM_CSRF_MAX_AGE = 60 * 60
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,30 @@ def verify_login_csrf(cookie, submitted, config, now=None):
         return False
 
 
+def create_public_form_csrf(config, now=None):
+    """Create a short-lived CSRF token for the public enquiry form."""
+    issued = int(time.time() if now is None else now)
+    payload = f"{issued}.{secrets.token_urlsafe(24)}"
+    signature = hmac.new(config.session_secret, b"public-form:" + payload.encode(), hashlib.sha256).digest()
+    return payload + "." + _enc(signature)
+
+
+def verify_public_form_csrf(cookie, submitted, config, now=None):
+    if not cookie or not submitted or len(cookie) > 512 or len(submitted) > 512:
+        return False
+    if not hmac.compare_digest(cookie, submitted):
+        return False
+    try:
+        issued_text, nonce, signature = cookie.split(".", 2)
+        issued = int(issued_text)
+        current = int(time.time() if now is None else now)
+        payload = f"{issued}.{nonce}"
+        expected = hmac.new(config.session_secret, b"public-form:" + payload.encode(), hashlib.sha256).digest()
+        return bool(nonce) and hmac.compare_digest(expected, _dec(signature)) and issued <= current + 30 and current - issued <= PUBLIC_FORM_CSRF_MAX_AGE
+    except (ValueError, TypeError, UnicodeError):
+        return False
+
+
 def _setup():
     password = getpass.getpass("Choose the app password (12+ characters): ")
     if password != getpass.getpass("Enter it again: "):
@@ -172,4 +197,3 @@ def _setup():
 
 if __name__ == "__main__":
     _setup()
-

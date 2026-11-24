@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, DateTime, Integer, String, Text, create_engine, inspect, text,
+    Boolean, Column, DateTime, Integer, String, Text, create_engine, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, synonym
 
@@ -87,6 +87,29 @@ class Prospect(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class HomeownerInquiry(Base):
+    """Minimal homeowner request data, kept separate from business prospects."""
+    __tablename__ = "homeowner_inquiries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String(120), nullable=False)
+    email = Column(String(320), nullable=False, default="")
+    phone = Column(String(40), nullable=False, default="")
+    postcode = Column(String(16), nullable=False)
+    property_type = Column(String(40), nullable=False)
+    heating_type = Column(String(40), nullable=False)
+    ownership = Column(String(40), nullable=False)
+    timeframe = Column(String(40), nullable=False)
+    consent_contact = Column(Boolean, nullable=False, default=False)
+    consent_share = Column(Boolean, nullable=False, default=False)
+    consent_version = Column(String(40), nullable=False)
+    consented_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    status = Column(String(32), nullable=False, default="new", index=True)
+    matched_installer_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
 
@@ -116,4 +139,3 @@ def create_tables():
                 connection.execute(
                     text(f"ALTER TABLE prospects ADD COLUMN {name} {definition}")
                 )
-

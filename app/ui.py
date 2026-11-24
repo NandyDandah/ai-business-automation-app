@@ -365,19 +365,21 @@ NAV_ICONS = {
     "/dashboard": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="7" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="4" rx="1.5"/><rect x="13.5" y="10.5" width="6.5" height="9.5" rx="1.5"/><rect x="4" y="14" width="6.5" height="6" rx="1.5"/></svg>',
     "/pipeline": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></svg>',
     "/prospect-database": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18M10 12v2h4v-2"/></svg>',
+    "/retrofit-inquiries": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 10.5 12 4l8.5 6.5M6 9v10h12V9M9.5 19v-5h5v5"/><path d="M17 5h3v3"/></svg>',
 }
 
 
 def build_protected_page(markup: str, path: str, csrf_token: str):
     page_names = {
         "/": "New analysis", "/dashboard": "Overview", "/pipeline": "Pipeline",
-        "/prospect-database": "Business database",
+        "/prospect-database": "Business database", "/retrofit-inquiries": "Retrofit enquiries",
     }
     page_name = page_names.get(path, "Workspace")
     nav = []
     for href, label in (
         ("/", "Message lab"), ("/dashboard", "Overview"),
         ("/pipeline", "Pipeline"), ("/prospect-database", "Businesses"),
+        ("/retrofit-inquiries", "Retrofit enquiries"),
     ):
         active = " active" if href == path else ""
         current = ' aria-current="page"' if href == path else ""
@@ -1047,4 +1049,70 @@ PIPELINE_PAGE = """<!doctype html>
   </script>
 </body>
 </html>"""
+
+
+def build_public_retrofit_page(csrf_token: str, enabled: bool, controller: str = "",
+                               privacy_url: str = "", message: str = ""):
+    """Render the consent-based, minimal-data public heat-pump enquiry page."""
+    safe_controller = escape(controller)
+    safe_privacy = escape(privacy_url, quote=True)
+    alert = f'<div class="alert" role="alert">{escape(message)}</div>' if message else ""
+    if not enabled:
+        content = """<section class="closed-card"><span class="eyebrow">PILOT IN PREPARATION</span>
+          <h1>Home energy enquiries are getting ready.</h1>
+          <p>This enquiry form is not accepting submissions yet. Please check back later.</p>
+          <div class="trust"><span>Private by design</span><span>No unsolicited marketing</span></div>
+        </section>"""
+    else:
+        content = f"""<section class="hero">
+          <span class="eyebrow">A CLEARER NEXT STEP FOR YOUR HOME</span>
+          <h1>Explore whether a heat pump could suit your home.</h1>
+          <p>Share a few details and we’ll review your request. If you choose to be introduced, we’ll first select one installer for you to consider. This is not a grant eligibility check or a quote.</p>
+        </section>
+        {alert}
+        <form class="form-card" method="post" action="/retrofit/enquiries" id="enquiryForm">
+          <input type="hidden" name="csrf_token" value="{escape(csrf_token, quote=True)}">
+          <div class="field-grid">
+            <label>Your name<input name="full_name" autocomplete="name" maxlength="120" required></label>
+            <label>Email address <span class="optional">(optional if you give a phone number)</span><input name="email" type="email" autocomplete="email" maxlength="320"></label>
+            <label>Phone number <span class="optional">(optional if you give an email)</span><input name="phone" type="tel" autocomplete="tel" maxlength="40"></label>
+            <label>Home postcode<input name="postcode" autocomplete="postal-code" maxlength="16" placeholder="e.g. B1 1AA" required></label>
+            <label>Property type<select name="property_type" required><option value="">Choose one</option><option>House</option><option>Bungalow</option><option>Flat</option><option>Other</option><option>Not sure</option></select></label>
+            <label>Current heating<select name="heating_type" required><option value="">Choose one</option><option>Gas</option><option>Oil</option><option>Electric</option><option>LPG</option><option>Solid fuel</option><option>Other</option><option>Not sure</option></select></label>
+            <label>Your relationship to the property<select name="ownership" required><option value="">Choose one</option><option>Owner occupier</option><option>Landlord</option><option>Buying the property</option><option>Other</option></select></label>
+            <label>When are you considering a change?<select name="timeframe" required><option value="">Choose one</option><option>Just exploring</option><option>Within 3 months</option><option>3 to 6 months</option><option>More than 6 months</option></select></label>
+          </div>
+          <label class="consent"><input type="checkbox" name="consent_contact" value="true" required><span>I agree that {safe_controller} may use these details to respond to this heat-pump enquiry. I understand this is not a marketing subscription.</span></label>
+          <label class="consent"><input type="checkbox" name="consent_share" value="true"><span>I’m happy for my relevant details to be shared with one installer selected for my area, so they can contact me about this request. This is optional and can be changed by contacting {safe_controller}.</span></label>
+          <div class="form-foot"><span>We collect only the details needed to review your request. <a href="{safe_privacy}" target="_blank" rel="noopener noreferrer">Read the privacy notice</a>.</span><button type="submit">Send enquiry <b aria-hidden="true">→</b></button></div>
+          <p class="controller">Data controller: {safe_controller}. No automatic installer sharing; each match is reviewed by a person.</p>
+          <input class="trap" type="text" name="company" tabindex="-1" autocomplete="off" aria-hidden="true">
+        </form>"""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#14243b"><title>Home energy enquiry</title>
+<style>
+:root{{--ink:#17243b;--muted:#718096;--line:#e5eaf1;--lime:#c9f27e;--blue:#6678df;--canvas:#f4f6fa}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:radial-gradient(circle at 80% 0,#e8efd9,transparent 30%),var(--canvas);font:15px/1.6 Inter,"Segoe UI Variable",Aptos,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}.wrap{{width:min(100% - 36px,820px);margin:0 auto;padding:45px 0 70px}}.brand{{display:flex;align-items:center;gap:10px;margin-bottom:45px;font-size:11px;font-weight:800;letter-spacing:.12em}}.mark{{display:grid;width:34px;height:34px;place-items:center;border-radius:11px;background:linear-gradient(145deg,#d7f79b,#9ee0c7)}}.eyebrow{{color:#6f8299;font-size:10px;font-weight:800;letter-spacing:.15em}}h1{{max-width:700px;margin:12px 0;color:var(--ink);font-size:clamp(32px,6vw,52px);letter-spacing:-.055em;line-height:1.08}}.hero p,.closed-card p{{max-width:650px;color:var(--muted);font-size:15px}}.form-card,.closed-card{{margin-top:28px;padding:clamp(20px,4vw,34px);border:1px solid var(--line);border-radius:20px;background:#fff;box-shadow:0 20px 55px #1c2d4610}}.field-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}}.field-grid label{{display:grid;gap:7px;color:#47566d;font-size:12px;font-weight:700}}input:not([type=checkbox]),select{{width:100%;height:46px;padding:0 12px;border:1px solid #dfe6ef;border-radius:10px;color:var(--ink);background:#fbfcfe;font:inherit}}input:focus,select:focus{{outline:3px solid #6678df33;border-color:#98a3ed}}.optional{{color:#8a97a8;font-size:10px;font-weight:500}}.consent{{display:flex;align-items:flex-start;gap:10px;margin:19px 0;color:#5d6c81;font-size:11px;line-height:1.6}}.consent input{{flex:0 0 auto;width:17px;height:17px;margin-top:1px;accent-color:#638b4e}}.form-foot{{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:21px;padding-top:19px;border-top:1px solid #edf0f4;color:#7b8798;font-size:10px}}.form-foot a{{color:#5368ca;text-decoration:underline;text-underline-offset:3px}}button{{min-height:46px;padding:0 18px;border:0;border-radius:11px;color:#1c2c42;background:var(--lime);font:700 12px inherit;cursor:pointer}}button:hover{{background:#d5f69b}}button b{{margin-left:10px;font-size:16px}}.controller{{margin:16px 0 0;color:#97a1af;font-size:9px}}.trust{{display:flex;gap:10px;margin-top:25px;color:#66758b;font-size:10px}}.trust span{{padding:8px 11px;border:1px solid var(--line);border-radius:99px;background:#fff}}.alert{{margin-top:16px;padding:12px 14px;border:1px solid #f0d0cb;border-radius:10px;color:#984a43;background:#fff6f4;font-size:12px}}.trap{{position:absolute!important;left:-10000px!important;width:1px!important;height:1px!important;opacity:0!important}}@media(max-width:620px){{.wrap{{padding-top:28px}}.brand{{margin-bottom:30px}}.field-grid{{grid-template-columns:1fr}}.form-foot{{align-items:stretch;flex-direction:column}}.form-foot button{{width:100%}}}}
+</style></head><body><main class="wrap"><div class="brand"><span class="mark" aria-hidden="true">✦</span><span>HOME ENERGY ENQUIRIES</span></div>{content}</main>
+<script>const f=document.getElementById('enquiryForm');if(f)f.addEventListener('submit',function(e){{const email=f.elements.email.value.trim(),phone=f.elements.phone.value.trim();if(!email&&!phone){{e.preventDefault();f.elements.email.setCustomValidity('Add an email address or phone number.');f.elements.email.reportValidity();}}else{{f.elements.email.setCustomValidity('');}}}});</script></body></html>"""
+
+
+def build_retrofit_thanks_page(controller: str, contact_email: str):
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#14243b"><title>Enquiry received</title><style>body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f6fa;color:#17243b;font:15px/1.6 Inter,"Segoe UI",sans-serif}}main{{width:min(100% - 36px,620px);padding:clamp(24px,5vw,42px);border:1px solid #e5eaf1;border-radius:20px;background:white;box-shadow:0 20px 55px #1c2d4610}}.mark{{color:#5d8551;font-size:28px}}h1{{margin:12px 0 8px;font-size:34px;letter-spacing:-.04em}}p{{color:#718096}}a{{color:#5368ca}}</style></head><body><main><span class="mark" aria-hidden="true">✓</span><h1>Thanks, we’ve received your request.</h1><p>{escape(controller)} will review it. If you agreed to an installer introduction, your details will only be shared after a person reviews a potential match.</p><p>Questions? Contact <a href="mailto:{escape(contact_email, quote=True)}">{escape(contact_email)}</a>.</p></main></body></html>"""
+
+
+RETROFIT_INQUIRIES_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Retrofit enquiries</title></head><body>
+<section class="page-title-row"><div><p class="eyebrow"><span class="eyebrow-dot"></span>HOME ENERGY PILOT</p><h1>Enquiry review</h1><p>Review requests privately, check consent, and choose an installer manually. No homeowner details are sent to an installer by this screen.</p></div><div class="toolbar-actions"><a class="btn" href="/retrofit" target="_blank" rel="noopener noreferrer">Preview public form</a><button class="btn" id="refreshButton" type="button">Refresh</button></div></section>
+<div class="panel" style="padding:18px 20px;margin-bottom:16px"><strong>Before matching</strong><p style="margin:5px 0 0;color:#718096;font-size:11px">Check the postcode and installer service area, then confirm the installer’s current credentials and availability. Only assign an installer when the sharing checkbox is approved.</p></div>
+<div id="inquiries" style="display:grid;gap:13px"><div class="panel" style="padding:24px;color:#718096">Loading enquiries…</div></div><div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+const csrfToken=document.querySelector('meta[name="csrf-token"]').content;let installerRows=[];let timer;
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function notify(m,error){const t=document.getElementById('toast');t.textContent=m;t.classList.toggle('error',!!error);t.classList.add('visible');clearTimeout(timer);timer=setTimeout(()=>t.classList.remove('visible'),2600);}
+async function load(){const target=document.getElementById('inquiries');target.innerHTML='<div class="panel" style="padding:24px;color:#718096">Loading enquiries…</div>';try{const rs=await Promise.all([fetch('/api/retrofit/inquiries'),fetch('/api/retrofit/installers')]);if(rs.some(r=>!r.ok))throw new Error('Could not load the enquiry list.');const items=await rs[0].json();installerRows=await rs[1].json();if(!items.length){target.innerHTML='<div class="panel" style="padding:30px;color:#718096">No homeowner enquiries yet.</div>';return;}target.innerHTML=items.map(item=>{const opts=['new','reviewing','qualified','matched','contacted','survey_booked','closed'].map(s=>'<option value="'+s+'" '+(item.status===s?'selected':'')+'>'+s.replaceAll('_',' ')+'</option>').join('');const installerOptions='<option value="">No installer selected</option>'+installerRows.map(x=>'<option value="'+Number(x.id)+'" '+(Number(item.matched_installer_id)===Number(x.id)?'selected':'')+'>'+esc(x.business_name)+' · '+esc([x.city,x.region].filter(Boolean).join(', ')||'area to confirm')+'</option>').join('');return '<article class="panel inquiry-card" data-id="'+Number(item.id)+'"><div class="inquiry-head"><div><span class="badge category">REQUEST #'+Number(item.id)+'</span><h2>'+esc(item.full_name)+'</h2><p>'+esc(item.postcode)+' · '+esc(item.property_type)+' · '+esc(item.heating_type)+'</p></div><span class="badge priority medium">'+esc(item.status.replaceAll('_',' '))+'</span></div><div class="inquiry-facts"><span><b>Contact</b>'+esc([item.email,item.phone].filter(Boolean).join(' · ')||'None supplied')+'</span><span><b>Ownership</b>'+esc(item.ownership)+'</span><span><b>Timing</b>'+esc(item.timeframe)+'</span><span><b>Received</b>'+esc(item.created_at)+'</span></div><p class="consent-state">Contact permission: <strong>'+ (item.consent_contact?'Yes':'No')+'</strong> · Installer sharing: <strong>'+ (item.consent_share?'Approved':'Not approved')+'</strong></p><div class="inquiry-controls"><label>Status<select class="inline-select status">'+opts+'</select></label><label>Manual installer match<select class="inline-select installer">'+installerOptions+'</select></label><button class="btn btn-primary save" type="button">Save review</button><button class="btn delete" type="button">Erase request</button></div></article>';}).join('');target.querySelectorAll('.save').forEach(b=>b.addEventListener('click',save));target.querySelectorAll('.delete').forEach(b=>b.addEventListener('click',erase));}catch(e){target.innerHTML='<div class="panel" style="padding:24px;color:#984a43">'+esc(e.message)+'</div>';}}
+async function save(e){const card=e.currentTarget.closest('[data-id]');const id=Number(card.dataset.id);const installer=card.querySelector('.installer').value;const payload={status:card.querySelector('.status').value,matched_installer_id:installer?Number(installer):null};try{const r=await fetch('/api/retrofit/inquiries/'+id,{method:'PATCH',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},body:JSON.stringify(payload)});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||'The review could not be saved.');}notify('Review saved.');await load();}catch(err){notify(err.message,true);}}
+async function erase(e){const card=e.currentTarget.closest('[data-id]');if(!window.confirm('Permanently erase this homeowner request?'))return;try{const r=await fetch('/api/retrofit/inquiries/'+Number(card.dataset.id),{method:'DELETE',headers:{'X-CSRF-Token':csrfToken}});if(!r.ok)throw new Error('The request could not be erased.');notify('Request erased.');await load();}catch(err){notify(err.message,true);}}
+document.getElementById('refreshButton').addEventListener('click',load);load();
+</script><style>.inquiry-card{padding:20px}.inquiry-head{display:flex;justify-content:space-between;gap:14px}.inquiry-head h2{margin:10px 0 2px;font-size:17px}.inquiry-head p{margin:0;color:#718096;font-size:11px}.inquiry-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}.inquiry-facts span{padding:11px;border-radius:10px;background:#f8f9fc;color:#59687d;font-size:10px;overflow-wrap:anywhere}.inquiry-facts b{display:block;margin-bottom:3px;color:#91a0b2;font-size:8px;text-transform:uppercase;letter-spacing:.08em}.consent-state{color:#65748b;font-size:10px}.inquiry-controls{display:grid;grid-template-columns:1fr 1.5fr auto auto;align-items:end;gap:9px;margin-top:14px}.inquiry-controls label{display:grid;gap:5px;color:#66758b;font-size:9px}.inquiry-controls .btn-primary{min-height:40px}.inquiry-controls .delete{min-height:40px;color:#994e48}.toast{position:fixed;right:22px;bottom:22px;padding:11px 15px;border-radius:10px;color:white;background:#213652;font-size:11px;opacity:0;transform:translateY(8px);transition:.18s;pointer-events:none}.toast.visible{opacity:1;transform:none}.toast.error{background:#984a43}@media(max-width:760px){.inquiry-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.inquiry-controls{grid-template-columns:1fr 1fr}.inquiry-controls button{width:100%}}
+</style></body></html>"""
 
