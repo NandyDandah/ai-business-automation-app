@@ -22,7 +22,7 @@ os.environ["APP_PASSWORD_HASH"] = hash_password(PASSWORD)
 os.environ["APP_API_TOKEN_HASH"] = hash_api_token(TOKEN)
 
 from fastapi.testclient import TestClient
-from app.database import Automation, Prospect, SessionLocal
+from app.database import Automation, Campaign, CampaignProspect, Prospect, SessionLocal
 from app.main import app, AUTH_CONFIG
 from app.security import get_session_csrf_token
 
@@ -42,6 +42,8 @@ def session_csrf(client):
 class AuthenticationTests(unittest.TestCase):
     def setUp(self):
         with SessionLocal() as db:
+            db.query(CampaignProspect).delete()
+            db.query(Campaign).delete()
             db.query(Prospect).delete()
             db.query(Automation).delete()
             db.commit()
@@ -140,6 +142,30 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(saved.json()[0]["public_email"], "hello@north-demo-dental.invalid")
         invalid = self.client.post("/prospects/batch", json={"prospects": [{"clinic_name": "Missing source"}]}, headers=headers)
         self.assertEqual(invalid.status_code, 422)
+
+    def test_campaign_discovery_uses_the_location_the_user_entered(self):
+        with SessionLocal() as db:
+            campaign = Campaign(
+                title="Map search test", industry="Healthcare", business_type="Aesthetic clinic",
+                region="northwest", country="United Kingdom", offer="Synthetic test only",
+            )
+            db.add(campaign)
+            db.commit()
+            campaign_id = campaign.id
+
+        result = {
+            "results": [], "location_label": "Birmingham, West Midlands, England, United Kingdom",
+            "attribution": "© OpenStreetMap contributors", "license": "Open Database License (ODbL)",
+        }
+        with patch("app.main.discover_openstreetmap_businesses", return_value=result) as discover:
+            response = self.client.post(
+                f"/api/campaigns/{campaign_id}/discover",
+                json={"business_type": "Aesthetic clinic", "location": "Birmingham, United Kingdom", "radius_m": 5000},
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        discover.assert_called_once_with("Aesthetic clinic", "Birmingham, United Kingdom", 5000, limit=40)
 
     def test_business_skill_documents_tool_costs_and_safe_api_use(self):
         root = Path(__file__).resolve().parents[1] / "skills" / "business-prospect-finder"

@@ -940,10 +940,11 @@ def discover_campaign_businesses(
     campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    # The discovery form asks for a specific city, town, or postcode. Do not
+    # append a campaign region here: old campaigns may contain broad or
+    # malformed values (for example "northwest"), which make valid places
+    # such as "Birmingham, United Kingdom" unresolvable.
     search_location = payload.location.strip()
-    qualifiers = [value.strip() for value in (campaign.region, campaign.country) if value and value.strip()]
-    if qualifiers and not all(value.lower() in search_location.lower() for value in qualifiers):
-        search_location = ", ".join([search_location] + qualifiers)
     try:
         result = discover_openstreetmap_businesses(
             payload.business_type.strip(), search_location, payload.radius_m, limit=40

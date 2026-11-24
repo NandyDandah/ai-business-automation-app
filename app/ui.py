@@ -760,10 +760,10 @@ CAMPAIGNS_PAGE = """<!doctype html>
     <div class="campaign-tools">
       <section class="panel campaign-panel">
         <h2>Find local businesses</h2>
-        <p>Search named business listings in OpenStreetMap. Results can be incomplete; verify fit and contact details before use.</p>
+        <p>Enter a city, town, or postcode (for example, Birmingham or B1). Search uses the place you enter. OpenStreetMap listings can be incomplete, so verify fit and contact details before use.</p>
         <form class="campaign-discovery" id="campaignDiscoveryForm">
           <label>Business type<input name="business_type" maxlength="120" required placeholder="Aesthetic clinic"></label>
-          <label>City, town or postcode<input name="location" maxlength="120" required placeholder="Birmingham"></label>
+          <label>City, town or postcode<input name="location" maxlength="120" required placeholder="Birmingham or B1"></label>
           <label>Search radius<select name="radius_m"><option value="1000">1 km</option><option value="3000">3 km</option><option value="5000" selected>5 km</option><option value="10000">10 km</option></select></label>
           <button class="btn-primary" type="submit">Find businesses</button>
         </form>
@@ -880,7 +880,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
         document.getElementById("workspaceBrief").textContent = brief;
         const discoveryForm = document.getElementById("campaignDiscoveryForm");
         discoveryForm.elements.business_type.value = currentCampaign.business_type || currentCampaign.industry || "";
-        discoveryForm.elements.location.value = [currentCampaign.region, currentCampaign.country].filter(Boolean).join(", ");
+        discoveryForm.elements.location.value = "";
         document.getElementById("exportCampaign").href = "/api/campaigns/" + id + "/export.csv";
         renderLeads(currentCampaign);
       } catch (error) { showNotice(error.message, true); }
