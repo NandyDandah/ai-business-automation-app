@@ -4,7 +4,7 @@ import os
 import re
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape as escape_html
 from threading import Lock
 from typing import Literal, Optional
@@ -29,7 +29,8 @@ from app.security import (
 )
 from app.ui import (
     BUSINESS_DATABASE_PAGE, DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE, RETROFIT_INQUIRIES_PAGE,
-    build_login_page, build_protected_page, build_public_retrofit_page, build_retrofit_thanks_page,
+    build_login_page, build_protected_page, build_public_privacy_page, build_public_retrofit_page,
+    build_retrofit_thanks_page,
 )
 
 AUTH_CONFIG = load_auth_config()
@@ -42,7 +43,7 @@ _LOGIN_LOCK = Lock()
 _PUBLIC_INQUIRY_ATTEMPTS = defaultdict(deque)
 _PUBLIC_INQUIRY_LOCK = Lock()
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
-_PUBLIC_PATHS = {"/login", "/retrofit"}
+_PUBLIC_PATHS = {"/login", "/retrofit", "/privacy"}
 _PUBLIC_POST_PATHS = {"/retrofit/enquiries"}
 
 
@@ -52,6 +53,7 @@ def _retrofit_config():
     controller = os.getenv("PUBLIC_ENQUIRY_CONTROLLER_NAME", "").strip()
     contact_email = os.getenv("PUBLIC_ENQUIRY_CONTACT_EMAIL", "").strip()
     privacy_url = os.getenv("PUBLIC_ENQUIRY_PRIVACY_URL", "").strip()
+    close_at_raw = os.getenv("PUBLIC_ENQUIRY_CLOSE_AT", "").strip()
     try:
         retention_days = int(os.getenv("PUBLIC_ENQUIRY_RETENTION_DAYS", "0"))
     except ValueError:
@@ -59,13 +61,29 @@ def _retrofit_config():
     email_ok = bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", contact_email))
     parsed_privacy = urlparse(privacy_url)
     privacy_ok = parsed_privacy.scheme == "https" and bool(parsed_privacy.netloc)
-    ready = requested and bool(controller) and email_ok and privacy_ok and 1 <= retention_days <= 365
+    close_at = None
+    close_at_ok = True
+    if close_at_raw:
+        try:
+            close_at = datetime.fromisoformat(close_at_raw.replace("Z", "+00:00"))
+            if close_at.tzinfo is None:
+                close_at = close_at.replace(tzinfo=timezone.utc)
+            close_at = close_at.astimezone(timezone.utc)
+        except ValueError:
+            close_at_ok = False
+    within_pilot_window = close_at is None or datetime.now(timezone.utc) < close_at
+    ready = (
+        requested and bool(controller) and email_ok and privacy_ok
+        and 1 <= retention_days <= 365 and close_at_ok and within_pilot_window
+    )
     return {
         "enabled": ready,
         "controller": controller,
         "contact_email": contact_email,
         "privacy_url": privacy_url,
         "retention_days": retention_days,
+        "close_at": close_at,
+        "close_date": close_at.strftime("%d %B %Y").lstrip("0") if close_at else "",
     }
 
 
@@ -192,8 +210,9 @@ def custom_openapi():
         "type": "http", "scheme": "bearer", "bearerFormat": "API token"
     }
     schema["security"] = [{"BearerAuth": []}]
-    for operation in schema.get("paths", {}).get("/login", {}).values():
-        operation["security"] = []
+    for path in ("/login", "/retrofit", "/retrofit/enquiries", "/privacy"):
+        for operation in schema.get("paths", {}).get(path, {}).values():
+            operation["security"] = []
     app.openapi_schema = schema
     return app.openapi_schema
 
@@ -445,7 +464,8 @@ def _public_retrofit_response(message="", status_code=200):
     token = create_public_form_csrf(AUTH_CONFIG)
     response = HTMLResponse(
         build_public_retrofit_page(
-            token, settings["enabled"], settings["controller"], settings["privacy_url"], message
+            token, settings["enabled"], settings["controller"], settings["privacy_url"], message,
+            settings["retention_days"], settings["close_date"],
         ),
         status_code=status_code,
     )
@@ -459,6 +479,14 @@ def _public_retrofit_response(message="", status_code=200):
 @app.get("/retrofit", response_class=HTMLResponse)
 def public_retrofit_form():
     return _public_retrofit_response()
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def public_privacy_notice():
+    settings = _retrofit_config()
+    return HTMLResponse(build_public_privacy_page(
+        settings["controller"], settings["contact_email"], settings["retention_days"], settings["close_date"]
+    ))
 
 
 @app.post("/retrofit/enquiries", response_class=HTMLResponse)

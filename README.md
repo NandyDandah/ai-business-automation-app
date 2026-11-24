@@ -61,8 +61,9 @@ The public `/retrofit` page is closed by default. To open it, privately configur
 - `PUBLIC_ENQUIRY_CONTACT_EMAIL` — an address monitored for privacy requests.
 - `PUBLIC_ENQUIRY_PRIVACY_URL` — the HTTPS URL of the privacy notice.
 - `PUBLIC_ENQUIRY_RETENTION_DAYS` — a documented period from 1 to 365 days.
+- `PUBLIC_ENQUIRY_CLOSE_AT` — an optional ISO-8601 UTC cutoff for a time-limited pilot; after it, the form closes automatically.
 
-The form asks for a name, an email or phone number, postcode, property type, current heating, ownership relationship, and likely timing. It does not ask for a full address. Contact permission is required; permission to share details with one installer is a separate, optional choice. Requests are stored in a separate `homeowner_inquiries` table, expire on the chosen retention date, and are removed on app start or before the private review list is shown. The public page uses CSRF protection, a honeypot, and a basic per-contact submission limit.
+The public `/privacy` page renders the controller, contact address, retention period, and pilot cutoff from configuration. The form asks for a name, an email or phone number, postcode, property type, current heating, ownership relationship, and likely timing. It does not ask for a full address. Contact permission is required; permission to share details with one installer is a separate, optional choice. Requests are stored in a separate `homeowner_inquiries` table, expire on the chosen retention date, and are removed on app start or before the private review list is shown. The public page uses CSRF protection, a honeypot, and a basic per-contact submission limit.
 
 The protected `/retrofit-inquiries` page is for manual review. It never sends messages or shares homeowner details automatically, and it blocks installer assignment unless sharing permission was given. Check the candidate's service area, current MCS status, capacity, and fit before making an introduction. This pilot does not assess grant eligibility, promise a quote, or send marketing. Add a stronger anti-spam service before promoting a public form at scale.
 
