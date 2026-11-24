@@ -105,3 +105,60 @@ def one_business_timeline(current_stage="new"):
         {"when": "Day 3 / Day 5", "action": "If there is no reply, prepare at most two useful follow-up drafts for review; stop after the final one."},
         {"when": "On a reply", "action": "Record the real outcome and update the pipeline; do not assume a sale."},
     ]
+
+
+def build_demo_simulation():
+    """Return an isolated example that makes no AI, database, or messaging calls."""
+    campaign = {
+        "title": "UK dental website and booking pilot",
+        "industry": "Healthcare",
+        "business_type": "Dental practice",
+        "region": "West Midlands",
+        "country": "United Kingdom",
+        "offer": (
+            "We help independent UK dental practices make key information and appointment requests "
+            "easier to find with clearer, mobile-friendly websites."
+        ),
+        "proof": "",
+        "tone": "Professional",
+        "language": "English",
+    }
+    business = {
+        "id": 0,
+        "business_name": "Example Dental Practice",
+        "industry": "Healthcare",
+        "business_type": "Dentist",
+        "city": "Birmingham",
+        "region": "West Midlands",
+        "country": "England",
+        "website": "",
+        "source_url": "",
+        "business_email": "",
+        "business_phone": "",
+    }
+    return {
+        "demo": True,
+        "business": {
+            "id": 0,
+            "name": business["business_name"],
+            "business_type": business["business_type"],
+            "area": "Birmingham, West Midlands, England, United Kingdom",
+            "source_url": "",
+        },
+        "fit": simulate_business_fit(campaign, business),
+        "draft": {
+            "subject": "An idea for clearer appointment requests",
+            "body": (
+                "Hello Example Dental Practice,\n\n"
+                "We help independent dental practices make key information and appointment requests "
+                "easier to find with clearer, mobile-friendly websites.\n\n"
+                "Would you be open to a short conversation?"
+            ),
+            "reason": "Sample wording based only on the example offer; no results or client claims are included.",
+        },
+        "draft_mode": "Local demo (no AI call)",
+        "timeline": one_business_timeline("new"),
+        "saved": False,
+        "sent": False,
+        "note": "Synthetic example only. It has no real source or contact details and must not be treated as a real lead.",
+    }

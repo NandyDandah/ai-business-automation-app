@@ -16,6 +16,8 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field, root_validator
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 load_dotenv()
@@ -25,7 +27,7 @@ from app.database import (
 )
 from app.ai_service import AIProviderError, analyse_business_message
 from app.prospecting import ProspectingError, discover_openstreetmap_businesses, draft_outreach_messages
-from app.simulation import one_business_timeline, simulate_business_fit
+from app.simulation import build_demo_simulation, one_business_timeline, simulate_business_fit
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
     create_public_form_csrf, get_session_csrf_token, load_auth_config, verify_api_token,
@@ -47,7 +49,7 @@ _LOGIN_LOCK = Lock()
 _PUBLIC_INQUIRY_ATTEMPTS = defaultdict(deque)
 _PUBLIC_INQUIRY_LOCK = Lock()
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
-_PUBLIC_PATHS = {"/login", "/retrofit", "/privacy"}
+_PUBLIC_PATHS = {"/login", "/retrofit", "/privacy", "/healthz"}
 _PUBLIC_POST_PATHS = {"/retrofit/enquiries"}
 
 
@@ -214,7 +216,7 @@ def custom_openapi():
         "type": "http", "scheme": "bearer", "bearerFormat": "API token"
     }
     schema["security"] = [{"BearerAuth": []}]
-    for path in ("/login", "/retrofit", "/retrofit/enquiries", "/privacy"):
+    for path in ("/login", "/retrofit", "/retrofit/enquiries", "/privacy", "/healthz"):
         for operation in schema.get("paths", {}).get(path, {}).values():
             operation["security"] = []
     app.openapi_schema = schema
@@ -335,6 +337,7 @@ class CampaignDiscoveryInput(BaseModel):
     business_type: str = Field(min_length=2, max_length=120)
     location: str = Field(min_length=2, max_length=120)
     radius_m: Literal[1000, 3000, 5000, 10000] = 5000
+    max_results: int = Field(default=20, ge=1, le=40)
 
 
 class CampaignLeadsInput(BaseModel):
@@ -369,6 +372,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@app.get("/healthz")
+def health_check(db: Session = Depends(get_db)):
+    """Public readiness check for Render; confirms the configured database responds."""
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Database unavailable") from None
+    return {"status": "ok"}
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -948,7 +961,7 @@ def discover_campaign_businesses(
     search_location = payload.location.strip()
     try:
         result = discover_openstreetmap_businesses(
-            payload.business_type.strip(), search_location, payload.radius_m, limit=40
+            payload.business_type.strip(), search_location, payload.radius_m, limit=payload.max_results
         )
     except ProspectingError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -1128,6 +1141,7 @@ def simulate_campaign_business(campaign_id: int, prospect_id: int, db: Session =
         "business_email": prospect.business_email or "",
         "business_phone": prospect.business_phone or "",
     }
+
     campaign_info = {
         "title": campaign.title,
         "industry": campaign.industry or "",
@@ -1163,6 +1177,12 @@ def simulate_campaign_business(campaign_id: int, prospect_id: int, db: Session =
         "sent": False,
         "note": "Simulation only. The preview is not saved, approved, scheduled, or sent.",
     }
+
+
+@app.post("/api/simulations/one-business-demo")
+def one_business_demo():
+    """Return a synthetic, isolated preview with no database or provider calls."""
+    return build_demo_simulation()
 
 
 @app.patch("/api/campaigns/{campaign_id}/leads/{prospect_id}")

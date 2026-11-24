@@ -695,7 +695,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
     .campaign-workspace-head h2 { margin:4px 0; color:#293a51; font-size:20px; }
     .campaign-workspace-head p { margin:0; max-width:700px; color:#7e8ca0; font-size:10px; line-height:1.6; }
     .campaign-tools { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-bottom:14px; }
-    .campaign-discovery { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-top:12px; }
+    .campaign-discovery { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 110px 110px auto; gap:8px; margin-top:12px; }
     .campaign-discovery label { display:grid; gap:5px; color:#596980; font-size:9px; font-weight:650; }
     .campaign-privacy { padding:13px 14px; border:1px solid #e5e9f1; border-radius:11px; color:#76849a; background:#f8fafc; font-size:9px; line-height:1.6; }
     .campaign-privacy strong { color:#526178; }
@@ -722,6 +722,11 @@ CAMPAIGNS_PAGE = """<!doctype html>
     .campaign-alert { display:none; margin:0 0 14px; padding:11px 13px; border:1px solid #dce9d3; border-radius:10px; color:#526e46; background:#f6fbf2; font-size:10px; }
     .campaign-alert.visible { display:block; }
     .campaign-alert.error { border-color:#f0d0cb; color:#984a43; background:#fff6f4; }
+    .campaign-quickstart { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:14px; padding:17px 20px; border:1px solid #e4e9f0; border-radius:14px; background:linear-gradient(115deg,#fff 0%,#f7faf6 100%); }
+    .campaign-quickstart h2 { margin:0 0 5px; color:#34435a; font-size:14px; }
+    .campaign-quickstart p { margin:0; max-width:620px; color:#8290a2; font-size:10px; line-height:1.55; }
+    .quickstart-actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .quickstart-actions button { white-space:nowrap; }
     .campaign-footnote { margin:10px 0 0; color:#98a2b0; font-size:8px; line-height:1.5; }
     .business-simulation { margin-top:13px; padding:14px; border:1px solid #e2e8f0; border-radius:12px; background:linear-gradient(145deg,#fbfcff,#f8fbf8); }
     .business-simulation[hidden] { display:none; }
@@ -738,8 +743,8 @@ CAMPAIGNS_PAGE = """<!doctype html>
     .simulation-draft { display:grid; gap:6px; margin-top:11px; color:#627088; font-size:9px; font-weight:700; }
     .simulation-draft textarea { width:100%; min-height:104px; padding:10px; border:1px solid #e1e7ef; border-radius:9px; color:#536178; background:#fff; font:inherit; font-size:9px; line-height:1.55; resize:vertical; }
     .simulation-timeline { display:grid; gap:6px; margin:10px 0 0; padding-left:18px; color:#7e8a9b; font-size:8px; line-height:1.5; }
-    @media(max-width:900px) { .campaign-grid,.campaign-tools { grid-template-columns:1fr; } }
-    @media(max-width:620px) { .campaign-row,.campaign-discovery,.simulation-breakdown { grid-template-columns:1fr; } .campaign-workspace-head,.campaign-leads-head { align-items:stretch; flex-direction:column; } .campaign-list-card { align-items:flex-start; flex-direction:column; } }
+    @media(max-width:900px) { .campaign-grid,.campaign-tools { grid-template-columns:1fr; } .campaign-discovery { grid-template-columns:repeat(2,minmax(0,1fr)); } .campaign-discovery button { grid-column:1/-1; } }
+    @media(max-width:620px) { .campaign-row,.campaign-discovery,.simulation-breakdown { grid-template-columns:1fr; } .campaign-discovery button { grid-column:auto; } .campaign-workspace-head,.campaign-leads-head,.campaign-quickstart { align-items:stretch; flex-direction:column; } .campaign-list-card { align-items:flex-start; flex-direction:column; } }
   </style>
 </head>
 <body>
@@ -747,6 +752,11 @@ CAMPAIGNS_PAGE = """<!doctype html>
     <div><p class="eyebrow"><span class="eyebrow-dot"></span>PROSPECTING WORKFLOW</p><h1>Campaign studio</h1><p>Find source-linked local businesses, group them by offer, and prepare outreach drafts for your review.</p></div>
   </section>
   <div class="campaign-alert" id="campaignAlert" role="status" aria-live="polite"></div>
+  <section class="campaign-quickstart">
+    <div><p class="eyebrow">QUICK START</p><h2>Start with a sample or try a safe preview</h2><p>Use an editable sample brief to create your first campaign, or preview a made-up business without saving data, calling an AI provider, or sending a message.</p></div>
+    <div class="quickstart-actions"><button class="btn" type="button" id="fillSampleBrief">Fill sample brief</button><button class="btn-primary" type="button" id="runDemoSimulation">Try safe preview</button></div>
+  </section>
+  <section class="business-simulation" id="campaignDemoResult" aria-live="polite" hidden></section>
   <div class="campaign-grid" id="campaignListView">
     <section class="panel campaign-panel">
       <h2>Build a campaign brief</h2>
@@ -780,6 +790,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
           <label>Business type<input name="business_type" maxlength="120" required placeholder="Aesthetic clinic"></label>
           <label>City, town or postcode<input name="location" maxlength="120" required placeholder="Birmingham or B1"></label>
           <label>Search radius<select name="radius_m"><option value="1000" selected>1 km</option><option value="3000">3 km</option><option value="5000">5 km</option><option value="10000">10 km</option></select></label>
+          <label>Results<select name="max_results"><option value="10">Up to 10</option><option value="20" selected>Up to 20</option><option value="40">Up to 40</option></select></label>
           <button class="btn-primary" type="submit">Find businesses</button>
         </form>
         <p class="campaign-footnote">Source: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a> · ODbL. Search by business area, not a person's address. The business type and location are sent to public map services only when you search. See the <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noopener noreferrer">Nominatim usage policy</a>.</p>
@@ -837,6 +848,47 @@ CAMPAIGNS_PAGE = """<!doctype html>
         link.rel = "noopener noreferrer";
         return link;
       } catch (_) { return null; }
+    }
+    function renderSimulationPreview(container, result) {
+      container.replaceChildren();
+      const head = node("div", "simulation-head", "");
+      const copy = node("div", "", "");
+      const heading = result.demo ? "Safe sample simulation" : "One-business simulation · " + result.business.name;
+      copy.appendChild(node("h5", "", heading));
+      copy.appendChild(node("p", "", result.demo ? result.business.area + " · synthetic example" : result.fit.band + " · " + result.draft_mode + " draft preview"));
+      head.append(copy, node("span", "simulation-score", result.fit.score + "/100"));
+      container.appendChild(head);
+      const breakdown = node("div", "simulation-breakdown", "");
+      result.fit.components.forEach(function(component) {
+        const row = node("div", "simulation-score-row", "");
+        const label = node("div", "simulation-score-label", "");
+        label.append(node("span", "", component.name), node("span", "", component.score + "/100"));
+        const track = node("div", "simulation-track", "");
+        const fill = node("span", "", "");
+        fill.style.width = Math.max(0, Math.min(100, Number(component.score) || 0)) + "%";
+        track.appendChild(fill);
+        row.append(label, track, node("p", "", component.evidence));
+        breakdown.appendChild(row);
+      });
+      container.appendChild(breakdown);
+      const draft = document.createElement("label");
+      draft.className = "simulation-draft";
+      draft.appendChild(document.createTextNode("Unsent draft preview — " + (result.draft.subject || "No subject")));
+      const preview = document.createElement("textarea");
+      preview.readOnly = true;
+      preview.value = result.draft.body || "";
+      draft.appendChild(preview);
+      container.appendChild(draft);
+      const timeline = document.createElement("ol");
+      timeline.className = "simulation-timeline";
+      result.timeline.forEach(function(step) {
+        const item = document.createElement("li");
+        item.textContent = step.when + " — " + step.action;
+        timeline.appendChild(item);
+      });
+      container.appendChild(timeline);
+      container.appendChild(node("p", "campaign-footnote", result.fit.method + " " + result.note));
+      container.hidden = false;
     }
     function renderCampaigns(items) {
       const list = document.getElementById("campaignList");
@@ -994,44 +1046,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
           button.textContent = "Simulating…";
           try {
             const result = await api("/api/campaigns/" + campaign.id + "/leads/" + lead.id + "/simulate", "POST", {});
-            simulation.replaceChildren();
-            const head = node("div", "simulation-head", "");
-            const copy = node("div", "", "");
-            copy.appendChild(node("h5", "", "One-business simulation · " + result.business.name));
-            copy.appendChild(node("p", "", result.fit.band + " · " + result.draft_mode + " draft preview"));
-            head.append(copy, node("span", "simulation-score", result.fit.score + "/100"));
-            simulation.appendChild(head);
-            const breakdown = node("div", "simulation-breakdown", "");
-            result.fit.components.forEach(function(component) {
-              const row = node("div", "simulation-score-row", "");
-              const label = node("div", "simulation-score-label", "");
-              label.append(node("span", "", component.name), node("span", "", component.score + "/100"));
-              const track = node("div", "simulation-track", "");
-              const fill = node("span", "", "");
-              fill.style.width = Math.max(0, Math.min(100, Number(component.score) || 0)) + "%";
-              track.appendChild(fill);
-              row.append(label, track, node("p", "", component.evidence));
-              breakdown.appendChild(row);
-            });
-            simulation.appendChild(breakdown);
-            const draft = document.createElement("label");
-            draft.className = "simulation-draft";
-            draft.appendChild(document.createTextNode("Unsent draft preview — " + (result.draft.subject || "No subject")));
-            const preview = document.createElement("textarea");
-            preview.readOnly = true;
-            preview.value = result.draft.body || "";
-            draft.appendChild(preview);
-            simulation.appendChild(draft);
-            const timeline = document.createElement("ol");
-            timeline.className = "simulation-timeline";
-            result.timeline.forEach(function(step) {
-              const item = document.createElement("li");
-              item.textContent = step.when + " — " + step.action;
-              timeline.appendChild(item);
-            });
-            simulation.appendChild(timeline);
-            simulation.appendChild(node("p", "campaign-footnote", result.fit.method + " " + result.note));
-            simulation.hidden = false;
+            renderSimulationPreview(simulation, result);
             showNotice("Simulation complete. The draft was not saved or sent.", false);
           } catch (error) { showNotice(error.message, true); }
           finally { button.disabled = false; button.textContent = oldLabel; }
@@ -1041,6 +1056,33 @@ CAMPAIGNS_PAGE = """<!doctype html>
         list.appendChild(card);
       });
     }
+    document.getElementById("fillSampleBrief").addEventListener("click", function() {
+      const form = document.getElementById("campaignCreateForm");
+      form.elements.title.value = "Website improvements for UK dental clinics";
+      form.elements.industry.value = "Healthcare";
+      form.elements.business_type.value = "Dental clinic";
+      form.elements.region.value = "West Midlands";
+      form.elements.country.value = "United Kingdom";
+      form.elements.offer.value = "I help UK dental clinics make treatment information easier to find and appointment requests simpler on mobile. I can review your current website and suggest practical improvements.";
+      form.elements.proof.value = "";
+      form.elements.tone.value = "Professional";
+      form.elements.language.value = "English";
+      form.elements.title.focus();
+      showNotice("Sample brief filled in. Review or change it, then choose Create campaign when ready.", false);
+    });
+    document.getElementById("runDemoSimulation").addEventListener("click", async function(event) {
+      const button = event.currentTarget;
+      const result = document.getElementById("campaignDemoResult");
+      button.disabled = true;
+      const oldLabel = button.textContent;
+      button.textContent = "Preparing preview…";
+      try {
+        const preview = await api("/api/simulations/one-business-demo", "POST", {});
+        renderSimulationPreview(result, preview);
+        showNotice("Safe sample ready. It is synthetic and was not saved or sent.", false);
+      } catch (error) { showNotice(error.message, true); }
+      finally { button.disabled = false; button.textContent = oldLabel; }
+    });
     document.getElementById("campaignCreateForm").addEventListener("submit", async function(event) {
       event.preventDefault();
       const form = event.currentTarget;
@@ -1058,6 +1100,7 @@ CAMPAIGNS_PAGE = """<!doctype html>
       if (!currentCampaign) return;
       const data = Object.fromEntries(new FormData(event.currentTarget).entries());
       data.radius_m = Number(data.radius_m);
+      data.max_results = Number(data.max_results);
       const button = event.currentTarget.querySelector("button[type=submit]");
       button.disabled = true;
       button.textContent = "Searching…";

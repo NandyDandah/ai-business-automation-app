@@ -60,6 +60,43 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(page.status_code, 303)
         self.assertEqual(self.client.put("/history/1/status?new_status=Closed").status_code, 401)
 
+    def test_health_check_is_public_and_reports_database_readiness(self):
+        response = self.client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_campaign_studio_has_sample_setup_and_twenty_result_default(self):
+        self.assertEqual(login(self.client).status_code, 303)
+        response = self.client.get("/campaigns")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="fillSampleBrief"', response.text)
+        self.assertIn('id="runDemoSimulation"', response.text)
+        self.assertIn(
+            'name="max_results"><option value="10">Up to 10</option><option value="20" selected>Up to 20</option>',
+            response.text,
+        )
+
+    def test_one_business_demo_is_protected_and_does_not_call_providers(self):
+        denied = self.client.post("/api/simulations/one-business-demo", json={})
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(login(self.client).status_code, 303)
+
+        with patch("app.main.draft_outreach_messages") as draft_provider:
+            response = self.client.post(
+                "/api/simulations/one-business-demo",
+                json={},
+                headers={"X-CSRF-Token": session_csrf(self.client)},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["demo"])
+        self.assertFalse(response.json()["saved"])
+        self.assertFalse(response.json()["sent"])
+        self.assertEqual(response.json()["draft_mode"], "Local demo (no AI call)")
+        draft_provider.assert_not_called()
+
     def test_login_csrf_write_protection_and_logout(self):
         page = self.client.get("/login")
         csrf = re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
@@ -161,12 +198,17 @@ class AuthenticationTests(unittest.TestCase):
         with patch("app.main.discover_openstreetmap_businesses", return_value=result) as discover:
             response = self.client.post(
                 f"/api/campaigns/{campaign_id}/discover",
-                json={"business_type": "Aesthetic clinic", "location": "Birmingham, United Kingdom", "radius_m": 5000},
+                json={
+                    "business_type": "Aesthetic clinic",
+                    "location": "Birmingham, United Kingdom",
+                    "radius_m": 5000,
+                    "max_results": 20,
+                },
                 headers={"Authorization": f"Bearer {TOKEN}"},
             )
 
         self.assertEqual(response.status_code, 200)
-        discover.assert_called_once_with("Aesthetic clinic", "Birmingham, United Kingdom", 5000, limit=40)
+        discover.assert_called_once_with("Aesthetic clinic", "Birmingham, United Kingdom", 5000, limit=20)
 
     def test_openstreetmap_retries_a_busy_wide_search_at_one_kilometre(self):
         place = {

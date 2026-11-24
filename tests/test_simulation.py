@@ -1,6 +1,6 @@
 import unittest
 
-from app.simulation import one_business_timeline, simulate_business_fit
+from app.simulation import build_demo_simulation, one_business_timeline, simulate_business_fit
 
 
 class OneBusinessSimulationTests(unittest.TestCase):
@@ -48,6 +48,17 @@ class OneBusinessSimulationTests(unittest.TestCase):
         self.assertEqual(result["components"][0]["score"], 28)
         self.assertTrue(all("send" not in step["action"].lower() or "manually" in step["action"].lower() for step in timeline))
         self.assertIn("do not assume a sale", timeline[-1]["action"])
+
+    def test_demo_is_synthetic_and_never_saves_or_sends(self):
+        result = build_demo_simulation()
+
+        self.assertTrue(result["demo"])
+        self.assertEqual(result["business"]["name"], "Example Dental Practice")
+        self.assertFalse(result["saved"])
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["draft_mode"], "Local demo (no AI call)")
+        self.assertEqual(result["business"]["source_url"], "")
+        self.assertIn("Synthetic example only", result["note"])
 
 
 if __name__ == "__main__":
