@@ -85,3 +85,9 @@ The prospect finder uses Agensi MCP tools at run time. It can use Google Maps or
 
 The API supports generic business/location fields, business-published contact details, and separate Hunter/Apollo enrichment fields. The old `/prospects` routes and clinic-specific request keys remain as aliases for compatibility. The protected `/prospect-database` page shows those fields separately. The skill only saves records when asked and when the caller already has a private API token configured. Use localhost only for an agent running on the same computer. A remote agent needs a privately accessible HTTPS API; never expose a database file.
 
+
+## Included open-source companion
+
+The upstream [Prospex AI sales and marketing application](https://github.com/asiifdev/business-leads-ai-automation) is included as a separate source snapshot in [`integrations/prospex`](integrations/prospex/README.md) at commit `ac477d791bf824cb0060e1e8da4d5d4aaebd5354`. Its original attribution, AGPL-3.0-or-later license, and commercial-license notice are preserved. Generated Playwright report output and Git metadata were left out.
+
+Prospex is a separate Next.js/NestJS application with its own Node.js, pnpm, Docker, PostgreSQL, and Redis requirements. The existing Render service still runs this repository's FastAPI app; adding the source snapshot does not deploy or activate Prospex. Follow its own README and review its licensing and service-specific settings before hosting or using its outreach features.

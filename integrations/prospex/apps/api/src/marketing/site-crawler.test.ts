@@ -1,0 +1,74 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { friendlyReason, normalizeCandidate, parseLlmsLinks, parseSitemapXml, robotsSitemaps, scoreUrl, selectPages } from "./site-crawler";
+
+const base = new URL("https://asiifdev.com/");
+
+test("normalizeCandidate keeps same-site pages and drops assets, other hosts and noise", () => {
+  assert.equal(normalizeCandidate("/layanan/", base), "https://asiifdev.com/layanan");
+  assert.equal(normalizeCandidate("https://www.asiifdev.com/tentang?utm=1#x", base), "https://asiifdev.com/tentang");
+  assert.equal(normalizeCandidate("https://other.com/x", base), null);
+  assert.equal(normalizeCandidate("/logo.png", base), null);
+  assert.equal(normalizeCandidate("/wp-admin/x", base), null);
+  assert.equal(normalizeCandidate("/blog/tag/ai", base), null);
+  assert.equal(normalizeCandidate("mailto:a@b.c", base), null);
+});
+
+test("parseSitemapXml reads urlsets and sitemap indexes", () => {
+  assert.deepEqual(parseSitemapXml("<urlset><url><loc>https://a.com/x</loc></url><url><loc> https://a.com/y?a=1&amp;b=2 </loc></url></urlset>").urls, ["https://a.com/x", "https://a.com/y?a=1&b=2"]);
+  const idx = parseSitemapXml("<sitemapindex><sitemap><loc>https://a.com/s1.xml</loc></sitemap></sitemapindex>");
+  assert.equal(idx.isIndex, true);
+  assert.deepEqual(idx.sitemaps, ["https://a.com/s1.xml"]);
+});
+
+test("parseLlmsLinks takes markdown and bare links from the same site", () => {
+  const txt = "# Asiifdev\n> AI agent\n- [Layanan](/layanan): jasa\n- [Harga](https://asiifdev.com/harga)\nLihat juga https://asiifdev.com/tentang. Luar: https://x.com/y";
+  assert.deepEqual(parseLlmsLinks(txt, base).sort(), ["https://asiifdev.com/harga", "https://asiifdev.com/layanan", "https://asiifdev.com/tentang"]);
+});
+
+test("robotsSitemaps", () => assert.deepEqual(robotsSitemaps("User-agent: *\nSitemap: https://a.com/sitemap.xml\nsitemap: https://a.com/b.xml"), ["https://a.com/sitemap.xml", "https://a.com/b.xml"]));
+
+test("ranking puts the home page first, then business pages, and limits blog posts", () => {
+  const start = "https://asiifdev.com";
+  const urls = [start, "https://asiifdev.com/layanan", "https://asiifdev.com/harga", "https://asiifdev.com/tentang", "https://asiifdev.com/kontak", "https://asiifdev.com/blog/a", "https://asiifdev.com/blog/b", "https://asiifdev.com/blog/c", "https://asiifdev.com/misc/deep/page/one"];
+  assert.ok(scoreUrl(start, start) > scoreUrl("https://asiifdev.com/layanan", start));
+  const picked = selectPages(urls, start, 8);
+  assert.equal(picked[0], start);
+  assert.ok(["layanan", "harga", "tentang"].every((p) => picked.includes(`https://asiifdev.com/${p}`)));
+  assert.equal(picked.filter((u) => u.includes("/blog/")).length, 2);
+  assert.equal(selectPages(urls, start, 3).length, 3);
+});
+
+test("friendlyReason hides browser internals", () => {
+  assert.equal(friendlyReason(new Error("page.goto: net::ERR_BLOCKED_BY_CLIENT at http://x/\nCall log:\n  - navigating")), "that address is not allowed");
+  assert.equal(friendlyReason(new Error("page.goto: net::ERR_NAME_NOT_RESOLVED at http://nope.invalid/")), "the address could not be found");
+  assert.equal(friendlyReason(new Error("Timeout 20000ms exceeded.\nCall log: ...")), "the page took too long to open");
+  assert.doesNotMatch(friendlyReason(new Error("browserType.launch: Executable doesn't exist\nlong help text")), /long help text/);
+});
+
+test("link parsers stay fast on hostile input", () => {
+  const cases = ["<a ".repeat(300_000), "[".repeat(500_000), "[x](".repeat(200_000), "http://".repeat(200_000)];
+  for (const text of cases) {
+    const t0 = Date.now();
+    parseLlmsLinks(text, base);
+    [...text.slice(0, 400_000).matchAll(/<a\s[^>]{0,400}?href=["']([^"'#\s]{1,500})["']/gi)];
+    assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+  }
+});
+
+import { dropRepeatedChrome } from "./site-crawler";
+import test2 from "node:test";
+import assert2 from "node:assert/strict";
+
+test2("menu and button lines repeated across pages are dropped, real content and headings stay", () => {
+  const nav = "Beranda\nMulai dengan Pemula\nKebijakan privasi";
+  const pages = ["# Fitur\nKasir cepat untuk toko.\n" + nav, "# Harga\nPaket mulai dari nol.\n" + nav, "# Tentang\nKami membantu pedagang.\n" + nav, "# Kontak\nHubungi kami.\n" + nav];
+  const out = dropRepeatedChrome(pages);
+  assert2.ok(out.every((t) => !t.includes("Mulai dengan Pemula") && !t.includes("Kebijakan privasi")));
+  assert2.ok(out[0].includes("# Fitur") && out[0].includes("Kasir cepat untuk toko."));
+});
+
+test2("with only a few pages nothing is dropped", () => {
+  const pages = ["a\nMenu", "b\nMenu"];
+  assert2.deepEqual(dropRepeatedChrome(pages), pages);
+});

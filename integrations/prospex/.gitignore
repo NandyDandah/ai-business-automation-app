@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+.next/
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Output files
+output/
+
+# Misc
+.DS_Store
+*.pem
+.turbo
+coverage/
+*.log
+apps/marketing/next-env.d.ts
+apps/web/next-env.d.ts
+apps/web/next-env.d.ts
+
+# Legacy pre-monorepo scripts (kept locally, not part of the repository)
+_legacy/
+
+# local dev login (never commit)
+.local-dev-login.txt
+
+# WhatsApp linked-device sessions (credentials)
+.wa-auth/
+
+# Playwright MCP scratch output
+.playwright-mcp/
+
+# uploaded WhatsApp attachments
+.attachments/

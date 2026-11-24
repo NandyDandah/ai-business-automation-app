@@ -1,0 +1,173 @@
+# Architecture
+
+A map of how Prospex is put together, for people who want to change it.
+
+## The pieces
+
+```
+ Dashboard (Next.js)  ── REST + JWT ──►  API (NestJS)  ──►  PostgreSQL 16 + pgvector
+                                          │   │
+                                          │   └──► Redis ── BullMQ ──► scraper worker (Playwright)
+                                          │
+                                          ├──► Chromium via Playwright (Google Maps scraping; JavaScript-only pages)
+                                          │       └─ web pages go through SafeProxy: public addresses only
+                                          ├──► AI provider (OpenAI-compatible: OpenAI, OpenRouter, Ollama)
+                                          └──► WhatsApp (Baileys linked device, behind WhatsappProvider)
+```
+
+Everything is scoped to a `Workspace`. Every table that holds customer data has a `workspaceId`, and every query filters on it. Users reach a workspace through `WorkspaceMember`.
+
+## API modules (`apps/api/src`)
+
+| Module | Responsibility |
+|--------|----------------|
+| `auth`, `workspace`, `settings` | Accounts (JWT), API keys, encrypted integration secrets |
+| `campaigns`, `scraper`, `leads` | Campaigns, Google Maps scraping (BullMQ worker, headless Chromium), leads and CRM state, search and paging, the map feed, and areas (province, city, district) from coordinates (`geo.ts`, `geo.service.ts`) |
+| `ai` | OpenAI-compatible client, lead scoring and per-business fit judgement, knowledge base (chunks and vectors), AI Style (chat-export parser, statistics, retrieval), spelling clean-up |
+| `marketing` | Marketing Brief: sources (websites, text, PDF, DOCX, Markdown), safe fetching and site crawling, guarded page renderer, brief generation and grounding |
+| `messaging` | Outbox, WhatsApp provider, sender, inbound handling and reply understanding, follow-ups, draft writer, one-message-for-many-leads templates |
+| `email` | Email channel: SMTP account (encrypted password), draft generation with subjects, sender with the same pacing rules, public unsubscribe page |
+| `entitlements` | Edition and plan checks (community or hosted), see [editions.md](editions.md) |
+| `analytics`, `export` | Reporting (including `GET /analytics/pipeline`: stage counts and value, replies waiting, quiet leads, due follow-ups, per campaign, lost reasons) and CSV/JSON/vCard export |
+
+## Marketing brief in detail
+
+| File (`apps/api/src/marketing`) | Role |
+|------|------|
+| `brief.service.ts` | Sources (add website, text, file; list; remove), background site reading, brief generation in three passes, saving versions |
+| `site-crawler.ts` | Reads a site as a whole: `llms.txt`, `robots.txt`, sitemaps (index files too), home-page links as a fallback; ranks pages; static fetch first, browser render when the page has almost no text; drops near-duplicate pages |
+| `url-fetch.ts` | Safe fetching: http and https on ports 80 and 443, no credentials in the URL, every address checked at connection time, redirects re-validated, size and time caps, a single linear pass HTML-to-text |
+| `safe-proxy.ts` | The proxy the render browser uses. It resolves a name once, refuses private and local addresses, and connects to the checked address, so DNS rebinding cannot swap in an internal one |
+| `page-renderer.ts` | Headless Chromium for JavaScript-only pages: sandbox on unless `PLAYWRIGHT_NO_SANDBOX=true`, no images, video or fonts, every request checked |
+| `document-text.ts` | `.md`, `.txt`, `.docx` (only `word/document.xml` is unzipped, size-checked, stripped in one pass) and `.pdf` (parsed in a worker thread that is killed on timeout and memory-limited) |
+| `brief-prompt.ts`, `brief-schema.ts` | The three prompts (positioning, evidence, outreach), merging, coercion of model output, grounding of evidence, customer search-term filter |
+| `brief-use.ts` | What the draft writer takes from the brief: matching angle, grounded proof, words to avoid |
+
+Design decisions worth knowing:
+
+- **Three small passes.** A single large JSON answer is where modest models misplace keys; each pass is retried once and a pass that still fails becomes a gap.
+- **Grounding after generation.** Numbers, customer names, testimonials and prices must occur in the source text, otherwise they are removed and listed as missing.
+- **The brief is a stored, versioned, editable document** (`marketing_briefs`, one per workspace). Sources keep their extracted text (`knowledge_sources.text`) so a brief can be regenerated without reading the site again.
+- **Fetching is the sensitive part.** Everything that opens a user-supplied address goes through the checks above; the unit tests include hostile inputs (private addresses, names resolving to loopback, pathological HTML, XML and link lists) with time limits.
+
+## Lead sources
+
+`scraper/sources/lead-source.ts` defines `LeadSource` (`search(request)` returns `RawSourceLead[]`, throws when it cannot run) and the shared lead shape. Implemented: `GoogleMapsSource` (the browser scraper), `OsmSource` (Nominatim box plus one Overpass request per place; `osm-tags.ts` turns search terms into tags, `osm-overpass.ts` builds the query and reads the answer, both pure). `LeadCollectorService` runs a campaign's `sources` in order, asks each only for what is left of `maxResults`, merges with `mergeSourceLeads` (same phone, website domain or name at the same place: fill the gaps, record `fieldSources`) and reports a failed source as a warning unless nothing was found anywhere. `LeadPipelineService` is everything after finding (fit, score, notes written four at a time, `LeadsService.createMany`, totals counted from the leads the campaign holds, areas, enrichment) and is shared by scraping and by file import. **Leads are stored as the search goes**: a source may call `SourceRequest.onBatch` with the leads it has found since the last call (the Maps source does so about every 100 leads), `saveBatch` scores and stores them and returns their ids, and a restart no longer loses hours of searching. The collector remembers which lead objects were stored; when a later source fills a detail that the stored lead lacked (a website from Overture, say), it is written afterwards by `LeadsService.applyFills`, only where the stored value is empty, with its source recorded. `ingest` stores what no batch stored yet and completes the campaign. A run that starts again for the same campaign (a retry, a restarted worker) skips leads the campaign already holds (`campaignLeadKeys`). If a source fails after batches were stored, those leads stay and the campaign shows the error. `LeadImportService` reads a CSV (`leads/import/csv.ts`) or .xlsx (`leads/import/xlsx.ts`), maps columns (`leads/import/lead-import.ts`) and queues an `import` job on the same `scraper` queue.
+
+`OvertureSource` reads Overture's public parquet files with DuckDB (`overture-query.ts` builds the query with bound parameters and reads rows, `overture-categories.ts` maps search terms to category pieces); the DuckDB connection is created on first use, queries run one at a time, and a fatal DuckDB error discards the connection. `place-box.ts` turns a place name into a map box and is shared with `OsmSource`. A pasted website list is read by `WebsiteListService` (page by page through the safe fetcher, five at a time) in a `import-websites` job on the same queue. See [lead-sources.md](lead-sources.md) for what each source costs, its terms and the sources that were reviewed and not built.
+
+To add a source: implement `LeadSource`, add its id to `common/lead-sources.ts`, register it in `LeadCollectorService`, and document its terms of use and cost (it must be free to run).
+
+## Enrichment
+
+`EnrichmentService.enrichLead` asks `enrichTarget` (`leads/enrich-target.ts`) what to read: the lead's own website, or a public Instagram or Facebook page (the "website" itself, or one listed in `enrichment.social` by a source). A website is read page by page (`contact-extract.ts` for contacts, `page-meta.ts` for meta tags and JSON-LD business details); a profile is read from its preview tags (`profile-meta.ts`: name, bio, phone numbers in running text). `save` fills only empty fields, records each field's source in `fieldMeta`, runs the free e-mail check and re-rates the lead. `readDue` (90 days) decides what is read again, before bulk drafting (`refreshIfDue`), for a campaign (`enrichCampaign`) and for the workspace (`enrichStale`). The fetcher is replaceable (`fetchPage`) so checks can use stand-in pages. What a lead says about itself reaches the draft writer through `aboutLine`, inside the `<data_bisnis>` block, clipped, as background only.
+
+## Data quality
+
+Separate from the score below. `leads/data-quality.ts` (pure, tested) turns a lead's facts into a level and reasons, `leads/dedupe.ts` finds the same business twice, and `leads/validation.ts` holds the free checks (DNS for e-mail domains, parked-page detection) and the bookkeeping for `Lead.fieldMeta` and `Lead.validation`.
+
+- `LeadsService.createMany` marks repeats (`duplicateOfId`), marks branches (`branchOfId`), records the source of each field and stores the first quality level. The same phone number or website at a place more than 300 m away is another outlet of the business: it is its own lead, never a repeat, is marked with the informational `branch` issue (which never lowers the level) and is not merged by `mergeSourceLeads`. Without coordinates on both sides the same number is still a repeat. Messaging the same number twice is prevented where drafts are made (`duplicateNumber`), not by dropping the lead. The scrape's own key (`scraper/lead-key.ts`) is phone plus place, so a chain's central number no longer reduces it to one lead.
+- `EnrichmentService` adds website liveness, parked detection and the e-mail domain check, and refreshes the quality level.
+- `MessagingService` and `EmailService` call `draftGate` before drafting and check the number or domain just before the AI call. The gate recomputes the level from the lead's facts (so "stale" is judged today, not when the lead was saved); the stored `dataQuality` is for display.
+- Draft risk flags for medium problems come from `qualityRiskLabels` in `MessageWriterService.outreach`.
+
+## Lead scoring
+
+`LeadIntelligenceService` ranks leads with an index built only from the listing and one judgement:
+
+```
+30 base
++15 phone   +3 address
++5 / +10 / +15  Bayesian rating (3.5 / 4.0 / 4.5; a prior of 4.0 worth 25 reviews)
++2 / +5 / +10   reviews (5 / 20 / 100)
++20 high, +8 medium, -15 low  fit with the offer (0 when not assessed)
+HIGH from 70, MEDIUM from 50
+```
+
+`FitService` judges fit per business in batches of 20, from the business name and the real Google Maps category against the offer and the brief's description of customers, and returns a reason that is shown on the lead. The scraper keeps the real Maps category on the lead and normalizes ratings (`4,6` and `4.6`). There are no industry or city tables.
+
+## Messaging in detail
+
+| File | Role |
+|------|------|
+| `message-writer.service.ts` | Writes first messages, follow-ups and replies. Combines lead data, style, retrieved examples and knowledge. Rejects output with template placeholders. Returns risk flags. |
+| `messaging.service.ts` | Outbox operations (generate in the background, edit, approve, reject, cancel, retry), account settings, overview |
+| `sender.service.ts` | 15-second loop: first sends an approved reply (`ai_reply`) outside the pacing, then applies the send policy to cold messages, claims a message atomically, sends, handles failures, trips the circuit breaker |
+| `send-policy.ts` | Pure functions: `decide`, `nextGapMs`, `typingDelayMs`, quiet hours, local-day boundaries. Unit tested. |
+| `inbound.service.ts` | Stores replies, honours STOP (and closes the lead as lost), ignores shop auto-replies, classifies the reply against the whole conversation, moves the lead forward, cancels follow-ups, schedules one reply draft after their last bubble (replacing any older waiting draft), and records the owner's own phone messages for numbers that belong to a lead |
+| `thread.ts`, `conversation-loader.ts` | Pure `buildThread` / `analyzeConversation` (bubbles written together, automatic messages set aside, who spoke last) and the loader that reads both sides of a lead's conversation from the database. One reading shared by receiving a message, writing a draft and re-reading the pipeline. |
+| `reclassify.service.ts` | Preview and apply: reads every conversation again, corrects labels and "waiting" status, withdraws outdated drafts, writes a fresh one where an answer is owed |
+| `wa-text.ts` | The readable text of a WhatsApp message: captions, wrapped messages, shared contact cards, markers for the owner's files; `parseReferrals` |
+| `whatsapp-format.ts` | Turns model output into WhatsApp syntax (Markdown converted, stray symbols removed, bold limited, paragraphs and lists spaced) |
+| `attachment.service.ts`, `attachment-file.ts` | Stores uploaded files per workspace, reads the type from the file's bytes, refuses deletion while a waiting message uses a file |
+| `link-preview.ts` | Builds the link card through `marketing/url-fetch.ts`; the card is handed to Baileys ready-made |
+| `outreach-agent.ts`, `outreach-agent-prompt.ts` | The first-message agent: a tool loop (`get_brief`, `search_knowledge`, `get_recipient`, `check_message`, `finish`). Every factual claim must cite a source the agent retrieved and share enough words with it; numbers must appear in a source; deterministic checks and an auditor model run before a message is accepted. The prompt names no industry. `MessageWriterService.agentDraft` wires it in and falls back to the single prompt when it returns null |
+| `outreach-check.ts`, `reply-plan.ts` | Checks a first message must pass (too short, a demo offered for a custom service, clients from the brief named to an unrelated business); style is left to the writer and the checks and fixed wording for replies, including a second reading by the model |
+| `offer-kind.ts` (`ai/chat-import`) | Reads an offer as a finished product or a service, which changes the first message
+| `reply-intent.ts` | Pure rules: `classifyReply` (auto_reply, interested, meeting, price, question, referral, not_now, not_interested, other; the previous message of ours is context, so "boleh" after an offered demo is a meeting) and `planReplyOutcome` (stage only forward, never closes a deal). Unit tested. |
+| `template.service.ts`, `template.controller.ts` | One message for many leads: categories, lead picker, one AI call to write a generic message, bulk draft creation with `{nama}` and `{kategori}`, skips contacts that cannot or should not be messaged |
+| `plain-text.ts` | Strips markdown symbols, emoji and guessed honorifics from drafts |
+| `followup.service.ts` | Hourly: drafts follow-ups after 3 and 5 days of silence, at most two |
+| `whatsapp.provider.ts` | The interface the rest of the code depends on |
+| `baileys.provider.ts` | Linked-device implementation: pairing QR, reconnect with backoff, session files, inbound events |
+| `phone.ts`, `opt-out.ts`, `draft-risk.ts` | Phone normalization, STOP and injection detection, output risk checks |
+
+### Data model (messaging)
+
+| Table | Purpose |
+|-------|---------|
+| `whatsapp_accounts` | One per workspace: status, limits, quiet hours, timezone, pause flag, next allowed send time |
+| `outbound_messages` | The queue and the history: body, the original AI text (`aiBody`, to measure edits), source, status, context (trace, flags), provider id |
+| `inbound_messages` | Replies, unique per workspace and provider message id (so redelivery is ignored), with the classified `intent` |
+| `message_opt_outs` | Numbers that must never be contacted, unique per workspace and number |
+| `message_attachments` | Files uploaded to send on WhatsApp: name, real type, size, generated storage key (never taken from the client) |
+
+`outbound_messages` also carries `attachmentId` (a file sent with the text) and `linkPreview` (the card). Its `source` can be `external`: a message the owner typed on their phone. `leads` carries `province`, `regency`, `district` and `geocodedAt`.
+
+`leads.phoneE164` stores the normalized number so replies can be matched to leads. Leads created before this column existed are backfilled at startup.
+
+### Design decisions worth knowing
+
+- **Deleting a lead or a campaign deletes what hangs off it.** The database cascades (`onDelete: Cascade` on `LeadActivity`, `FollowUp`, `OutboundMessage.lead`, `InboundMessage.lead`), so every path gets the same result. Opt-outs are separate tables and survive, so a number that said STOP is never messaged if the business is found again; inbound messages from numbers that never matched a lead are kept. A running campaign, or a lead with a message in `sending`, cannot be deleted. Repeats and branches pointing at a deleted lead become standalone leads. The pacing caps count `sent` messages, so deleting sent messages lowers them.
+
+- **Sales craft lives in one place.** `messaging/sales-playbook.ts` holds the persona, the craft, the market wording and the language-independent checks; the agent prompt, the single-prompt writer, follow-ups and replies all use it. Prompts name no industry, country or language. See [sales-playbook.md](sales-playbook.md).
+- **No length limits in prompts or checks.** Only storage ceilings remain. Length is the writer's call.
+- **Other languages are not run through Indonesian or English rules.** `normalizeDraft(..., { language: "other" })`, honorific rewriting only for Indonesian, opt-out line translated once, replies always model-written.
+
+- **Approval is the only way into the queue.** No code path sends a draft.
+- **The conversation is whole.** The owner's own phone messages are recorded (only for numbers that belong to a lead), so classification and drafts see both sides. A draft is never written for something already answered, and a newer draft replaces an older waiting one.
+- **Checks that use a fake provider stay in their own workspace.** `sender.tick(workspaceId)` exists for them; without it a fake provider is handed every workspace's queue.
+- **No business-specific words in the code.** Client and case-study names come from each user's own brief; examples in tests and docs are invented.
+- **Claim, then send.** `updateMany where status = approved` guarantees one winner, so a crash or a second process cannot double-send.
+- **Uncertain means failed, not retried.** A message found in `sending` after a restart might have been delivered. Prospex chooses a missed send over a duplicate.
+- **One provider interface.** The official WhatsApp Cloud API is a new class, not a rewrite.
+- **Untrusted text stays data.** Scraped listings, customer replies and exported chats are delimited in prompts, and the model's output is scanned before you see it.
+- **No canned content, no invented leads.** When no AI provider is configured Prospex produces no draft, and when scraping fails it fails the campaign. `SCRAPER_MODE=fixture` (tests only) returns labelled leads without phone numbers.
+
+## Email in detail
+
+Email reuses the `outbound_messages` table with `channel = "email"` (`toEmail`, `subject`), the approval flow in `MessagingService` and the pure `send-policy.ts`. It has its own account table (`email_accounts`, password encrypted), its own opt-out table (`email_opt_outs`) and its own sender (`EmailSenderService`), so WhatsApp and email each count their own quota. Details and limits: [email-channel.md](email-channel.md).
+
+## AI Style and knowledge base
+
+Both use pgvector: vectors are stored in `vector` columns and compared by cosine distance. Each row records the embedding model and dimensions, and queries only compare rows from the same model. See [ai-style.md](ai-style.md).
+
+## Frontend (`apps/web`)
+
+Next.js App Router with route groups `(auth)` and `(dashboard)`, shadcn/ui and Tailwind. Feature components live under `src/components/<feature>`. Text is translated through `src/lib/i18n` (English is the source, Indonesian must define every key, the language is kept in a cookie so the server renders the right one).
+
+## Testing
+
+| Layer | How |
+|-------|-----|
+| Pure logic (parser, stats, chunker, scoring, send policy, opt-out, spelling, brief, crawler, documents, hostile-input timing) | `pnpm --filter @prospex/api test` |
+| Sender, inbound, your own phone messages, outdated drafts, re-reading the pipeline and referrals against a real database | `apps/api/scripts/pipeline-check.ts` with a fake provider, in a throwaway workspace |
+| Attachments and link previews against a real database and a real page | `apps/api/scripts/attachment-check.ts` |
+| Reading websites and Instagram/Facebook pages, filling gaps with sources, refreshing old readings, against a real database with stand-in pages (and the real public pages with `LIVE=true`) | `apps/api/scripts/enrichment-check.ts` |
+| Overture Maps through DuckDB on the real public files | `apps/api/scripts/overture-check.ts` (network; the first search takes minutes) |
+| Lead sources and file import end to end (OpenStreetMap through the queue, CSV preview and import, repeats across sources, running and foreign campaigns) against a running API | `apps/api/scripts/sources-check.ts` (`SKIP_OSM=true` skips the public services) |
+| Data quality: repeats across campaigns and inside a batch, closed listings, quality filter, recompute, WhatsApp and e-mail gates before drafting, against a real database with a fake WhatsApp provider, stub writers and real DNS | `apps/api/scripts/data-quality-check.ts`, in a throwaway workspace |
+| Style quality | `apps/api/scripts/eval-style.ts` |
+| End to end UI | Playwright specs in `tests/e2e` |
+
+Real WhatsApp delivery cannot be tested without a linked phone, so the Baileys provider is verified by pairing manually.
