@@ -2,7 +2,8 @@ import os
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Integer, String, Text, create_engine, inspect, text,
+    Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+    create_engine, inspect, text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, synonym
 
@@ -85,6 +86,43 @@ class Prospect(Base):
     status = Column(String, default="New")
     fingerprint = Column(String, unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Campaign(Base):
+    """A single-owner outreach brief for a group of saved businesses."""
+    __tablename__ = "campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(160), nullable=False)
+    industry = Column(String(120), nullable=False, default="")
+    business_type = Column(String(120), nullable=False, default="")
+    region = Column(String(120), nullable=False, default="")
+    country = Column(String(120), nullable=False, default="")
+    offer = Column(Text, nullable=False, default="")
+    proof = Column(Text, nullable=False, default="")
+    tone = Column(String(80), nullable=False, default="Professional")
+    language = Column(String(80), nullable=False, default="English")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CampaignProspect(Base):
+    """Campaign-specific draft and review state; never sends messages."""
+    __tablename__ = "campaign_prospects"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "prospect_id", name="uq_campaign_prospect"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False, index=True)
+    prospect_id = Column(Integer, ForeignKey("prospects.id"), nullable=False, index=True)
+    draft_subject = Column(String(240), nullable=False, default="")
+    draft_body = Column(Text, nullable=False, default="")
+    draft_reason = Column(Text, nullable=False, default="")
+    draft_status = Column(String(24), nullable=False, default="not_drafted", index=True)
+    pipeline_stage = Column(String(24), nullable=False, default="new", index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
 
 
 class HomeownerInquiry(Base):

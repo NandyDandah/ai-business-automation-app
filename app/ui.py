@@ -365,6 +365,7 @@ NAV_ICONS = {
     "/dashboard": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="7" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="4" rx="1.5"/><rect x="13.5" y="10.5" width="6.5" height="9.5" rx="1.5"/><rect x="4" y="14" width="6.5" height="6" rx="1.5"/></svg>',
     "/pipeline": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></svg>',
     "/prospect-database": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18M10 12v2h4v-2"/></svg>',
+    "/campaigns": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 13 4 4 11-11"/><path d="M15 6h4v4M4 7h6M4 20h10"/></svg>',
     "/retrofit-inquiries": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 10.5 12 4l8.5 6.5M6 9v10h12V9M9.5 19v-5h5v5"/><path d="M17 5h3v3"/></svg>',
 }
 
@@ -372,13 +373,15 @@ NAV_ICONS = {
 def build_protected_page(markup: str, path: str, csrf_token: str):
     page_names = {
         "/": "New analysis", "/dashboard": "Overview", "/pipeline": "Pipeline",
-        "/prospect-database": "Business database", "/retrofit-inquiries": "Retrofit enquiries",
+        "/prospect-database": "Business database", "/campaigns": "Campaign studio",
+        "/retrofit-inquiries": "Retrofit enquiries",
     }
     page_name = page_names.get(path, "Workspace")
     nav = []
     for href, label in (
         ("/", "Message lab"), ("/dashboard", "Overview"),
         ("/pipeline", "Pipeline"), ("/prospect-database", "Businesses"),
+        ("/campaigns", "Campaign studio"),
         ("/retrofit-inquiries", "Retrofit enquiries"),
     ):
         active = " active" if href == path else ""
@@ -661,6 +664,384 @@ BUSINESS_DATABASE_PAGE = """<!doctype html>
       document.getElementById("businessCount").textContent = "Business list unavailable";
       document.getElementById("businessList").appendChild(textNode("div", "business-empty", error.message));
     });
+  </script>
+</body>
+</html>"""
+
+
+CAMPAIGNS_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Campaign studio · Business AI</title>
+  <style>
+    .campaign-intro { margin-bottom:22px; }
+    .campaign-grid { display:grid; grid-template-columns:minmax(280px,.82fr) minmax(0,1.18fr); gap:16px; align-items:start; }
+    .campaign-panel { padding:20px; }
+    .campaign-panel h2 { margin:0; color:#34435a; font-size:14px; }
+    .campaign-panel > p { color:#8290a2; font-size:10px; line-height:1.6; }
+    .campaign-form { display:grid; gap:11px; }
+    .campaign-form label { display:grid; gap:5px; color:#596980; font-size:10px; font-weight:650; }
+    .campaign-form input,.campaign-form select,.campaign-form textarea,.campaign-discovery input,.campaign-discovery select,.draft-editor input,.draft-editor textarea { width:100%; padding:10px 11px; border:1px solid #dfe6ef; border-radius:9px; color:#26364d; background:#fbfcfe; font:inherit; font-size:11px; }
+    .campaign-form textarea,.draft-editor textarea { min-height:76px; resize:vertical; line-height:1.55; }
+    .campaign-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .campaign-list { display:grid; gap:9px; margin-top:12px; }
+    .campaign-list-card { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px; border:1px solid #e8edf3; border-radius:11px; background:#fff; }
+    .campaign-list-card h3 { margin:0 0 4px; color:#34435a; font-size:11px; }
+    .campaign-list-card p { margin:0; color:#8794a5; font-size:9px; }
+    .campaign-workspace { margin-top:18px; }
+    .campaign-workspace-head { display:flex; align-items:flex-start; justify-content:space-between; gap:15px; margin-bottom:14px; }
+    .campaign-workspace-head h2 { margin:4px 0; color:#293a51; font-size:20px; }
+    .campaign-workspace-head p { margin:0; max-width:700px; color:#7e8ca0; font-size:10px; line-height:1.6; }
+    .campaign-tools { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-bottom:14px; }
+    .campaign-discovery { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-top:12px; }
+    .campaign-discovery label { display:grid; gap:5px; color:#596980; font-size:9px; font-weight:650; }
+    .campaign-privacy { padding:13px 14px; border:1px solid #e5e9f1; border-radius:11px; color:#76849a; background:#f8fafc; font-size:9px; line-height:1.6; }
+    .campaign-privacy strong { color:#526178; }
+    .campaign-leads-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:18px 0 10px; }
+    .campaign-leads-head h3 { margin:0; color:#34435a; font-size:13px; }
+    .campaign-lead-list { display:grid; gap:11px; }
+    .campaign-lead { padding:16px; border:1px solid #e5eaf0; border-radius:13px; background:#fff; box-shadow:0 6px 18px rgba(28,45,70,.025); }
+    .campaign-lead-top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .campaign-lead-top h4 { margin:0 0 4px; color:#34435a; font-size:12px; }
+    .campaign-lead-meta { color:#8794a5; font-size:9px; }
+    .campaign-lead-link { margin-top:5px; color:#5d6dd1; font-size:9px; }
+    .campaign-lead-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }
+    .campaign-lead-actions button,.campaign-actions button { min-height:32px; padding:0 11px; border:1px solid #e2e8f0; border-radius:8px; color:#526178; background:#fff; font:inherit; font-size:9px; font-weight:650; cursor:pointer; }
+    .campaign-lead-actions button:hover,.campaign-actions button:hover { border-color:#c7d1e0; background:#f8fafc; }
+    .campaign-lead-actions .approve-button { border-color:#c9e3b5; color:#527345; background:#f4faef; }
+    .campaign-lead-actions .reject-button { color:#8c5b55; }
+    .campaign-status { display:inline-flex; padding:4px 8px; border:1px solid #e5eaf1; border-radius:99px; color:#758399; background:#f8fafc; font-size:8px; font-weight:750; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+    .campaign-status.status-approved { border-color:#d0e6c4; color:#527345; background:#f5faef; }
+    .campaign-status.status-rejected { border-color:#f0d7d2; color:#925d56; background:#fff8f6; }
+    .campaign-status.status-needs_review { border-color:#e6dfc8; color:#8d7641; background:#fffdf3; }
+    .campaign-editor-label { display:grid; gap:5px; margin-top:12px; color:#68768b; font-size:9px; font-weight:650; }
+    .campaign-select { margin:2px 6px 0 0; accent-color:#6577d2; }
+    .campaign-empty { padding:24px 16px; border:1px dashed #dce2eb; border-radius:12px; color:#8794a5; background:#fff; font-size:10px; text-align:center; }
+    .campaign-alert { display:none; margin:0 0 14px; padding:11px 13px; border:1px solid #dce9d3; border-radius:10px; color:#526e46; background:#f6fbf2; font-size:10px; }
+    .campaign-alert.visible { display:block; }
+    .campaign-alert.error { border-color:#f0d0cb; color:#984a43; background:#fff6f4; }
+    .campaign-footnote { margin:10px 0 0; color:#98a2b0; font-size:8px; line-height:1.5; }
+    @media(max-width:900px) { .campaign-grid,.campaign-tools { grid-template-columns:1fr; } }
+    @media(max-width:620px) { .campaign-row,.campaign-discovery { grid-template-columns:1fr; } .campaign-workspace-head,.campaign-leads-head { align-items:stretch; flex-direction:column; } .campaign-list-card { align-items:flex-start; flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <section class="page-title-row campaign-intro">
+    <div><p class="eyebrow"><span class="eyebrow-dot"></span>PROSPECTING WORKFLOW</p><h1>Campaign studio</h1><p>Find source-linked local businesses, group them by offer, and prepare outreach drafts for your review.</p></div>
+  </section>
+  <div class="campaign-alert" id="campaignAlert" role="status" aria-live="polite"></div>
+  <div class="campaign-grid" id="campaignListView">
+    <section class="panel campaign-panel">
+      <h2>Build a campaign brief</h2>
+      <p>Describe the service you offer and who it helps. The brief keeps each draft on-topic.</p>
+      <form class="campaign-form" id="campaignCreateForm">
+        <label>Campaign name<input name="title" maxlength="160" required placeholder="Website refresh for independent clinics"></label>
+        <div class="campaign-row"><label>Industry<input name="industry" maxlength="120" placeholder="Healthcare"></label><label>Business type<input name="business_type" maxlength="120" placeholder="Aesthetic clinic"></label></div>
+        <div class="campaign-row"><label>Region<input name="region" maxlength="120" placeholder="West Midlands"></label><label>Country<input name="country" maxlength="120" placeholder="United Kingdom"></label></div>
+        <label>Your offer<textarea name="offer" maxlength="3000" required placeholder="What you do, who it is for, and the problem it solves."></textarea></label>
+        <label>Evidence you can honestly claim <span class="optional-label">Optional</span><textarea name="proof" maxlength="1500" placeholder="A result or experience you can verify. Leave blank if you have none."></textarea></label>
+        <div class="campaign-row"><label>Tone<select name="tone"><option>Professional</option><option>Warm</option><option>Direct</option><option>Conversational</option></select></label><label>Draft language<input name="language" maxlength="80" value="English"></label></div>
+        <button class="btn-primary" type="submit">Create campaign</button>
+      </form>
+    </section>
+    <section class="panel campaign-panel">
+      <h2>Your campaigns</h2>
+      <p>Each campaign has its own selected businesses and review-only drafts.</p>
+      <div class="campaign-list" id="campaignList"><div class="campaign-empty">Loading campaigns…</div></div>
+    </section>
+  </div>
+  <section class="campaign-workspace" id="campaignWorkspace" hidden>
+    <div class="campaign-workspace-head">
+      <div><button class="btn" type="button" id="backToCampaigns">← All campaigns</button><p class="eyebrow" style="margin-top:14px">CAMPAIGN WORKSPACE</p><h2 id="workspaceTitle"></h2><p id="workspaceBrief"></p></div>
+      <div class="campaign-actions"><a class="btn" id="exportCampaign" href="#">Export campaign CSV</a></div>
+    </div>
+    <div class="campaign-tools">
+      <section class="panel campaign-panel">
+        <h2>Find local businesses</h2>
+        <p>Search named business listings in OpenStreetMap. Results can be incomplete; verify fit and contact details before use.</p>
+        <form class="campaign-discovery" id="campaignDiscoveryForm">
+          <label>Business type<input name="business_type" maxlength="120" required placeholder="Aesthetic clinic"></label>
+          <label>City, town or postcode<input name="location" maxlength="120" required placeholder="Birmingham"></label>
+          <label>Search radius<select name="radius_m"><option value="1000">1 km</option><option value="3000">3 km</option><option value="5000" selected>5 km</option><option value="10000">10 km</option></select></label>
+          <button class="btn-primary" type="submit">Find businesses</button>
+        </form>
+        <p class="campaign-footnote">Source: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a> · ODbL. Search by business area, not a person's address. The business type and location are sent to public map services only when you search. See the <a href="https://operations.osmfoundation.org/policies/nominatim/" target="_blank" rel="noopener noreferrer">Nominatim usage policy</a>.</p>
+      </section>
+      <aside class="campaign-privacy"><strong>Review before contact</strong><br>Without an AI key, the app creates a basic template locally. With a configured AI key, drafting sends your campaign brief and selected business listing fields (name, type, area and website) to that provider; saved contact names, email addresses and phone numbers are excluded. Do not put confidential or personal data in the brief. AI drafting may incur provider charges. No messages are sent from this page; approval only marks a draft ready for you to copy or export.</aside>
+      <section class="panel campaign-panel">
+        <h2>Add saved businesses</h2>
+        <p>Bring leads you already saved through the Business Prospect Finder, Apollo, Hunter, or another trusted source into this campaign.</p>
+        <label class="campaign-editor-label" for="savedBusinessFilter">Filter saved records<input id="savedBusinessFilter" type="search" placeholder="Search by business, type, or location"></label>
+        <label class="campaign-editor-label" for="savedBusinessSelect">Select businesses<select id="savedBusinessSelect" multiple size="7" aria-label="Choose saved businesses"></select></label>
+        <div class="campaign-lead-actions"><button type="button" class="approve-button" id="addSavedBusinesses">Add selected businesses</button></div>
+        <p class="campaign-footnote">Only selected businesses are linked. Existing records and enrichment fields are left unchanged.</p>
+      </section>
+    </div>
+    <section>
+      <div class="campaign-leads-head"><div><h3 id="leadHeading">Campaign businesses</h3><span class="business-count" id="leadCounts"></span></div><button class="btn-primary" type="button" id="generateDrafts">Generate drafts for selected (up to 10)</button></div>
+      <div class="campaign-lead-list" id="campaignLeads"><div class="campaign-empty">Create a campaign, then search for businesses to get started.</div></div>
+    </section>
+  </section>
+  <script>
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+    let currentCampaign = null;
+    let savedBusinesses = [];
+    function node(tag, className, value) {
+      const item = document.createElement(tag);
+      if (className) item.className = className;
+      if (value !== undefined && value !== null) item.textContent = String(value);
+      return item;
+    }
+    function showNotice(message, isError) {
+      const box = document.getElementById("campaignAlert");
+      box.textContent = message || "";
+      box.className = "campaign-alert visible" + (isError ? " error" : "");
+    }
+    async function api(path, method, body) {
+      const headers = {"Accept":"application/json"};
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      if (method && method !== "GET") headers["X-CSRF-Token"] = csrfToken;
+      const response = await fetch(path, {method:method || "GET", headers:headers, credentials:"same-origin", body:body === undefined ? undefined : JSON.stringify(body)});
+      if (!response.ok) {
+        const data = await response.json().catch(function(){ return {}; });
+        throw new Error(data.detail || "The request could not be completed.");
+      }
+      return response.json();
+    }
+    function safeLink(url, label) {
+      if (!url) return null;
+      try {
+        const normalized = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : "https://" + url;
+        const parsed = new URL(normalized);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+        const link = node("a", "campaign-lead-link", label || url);
+        link.href = parsed.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        return link;
+      } catch (_) { return null; }
+    }
+    function renderCampaigns(items) {
+      const list = document.getElementById("campaignList");
+      list.replaceChildren();
+      if (!items.length) {
+        list.appendChild(node("div", "campaign-empty", "No campaigns yet. Create a brief to start collecting leads."));
+        return;
+      }
+      items.forEach(function(item) {
+        const card = node("article", "campaign-list-card", "");
+        const copy = node("div", "", "");
+        copy.appendChild(node("h3", "", item.title));
+        copy.appendChild(node("p", "", [item.business_type || item.industry, item.region, item.country].filter(Boolean).join(" · ") + " · " + item.lead_count + " businesses · " + item.draft_counts.needs_review + " to review"));
+        const open = node("button", "btn", "Open campaign");
+        open.type = "button";
+        open.addEventListener("click", function(){ openCampaign(item.id); });
+        card.append(copy, open);
+        list.appendChild(card);
+      });
+    }
+    async function loadCampaigns() {
+      try { renderCampaigns(await api("/api/campaigns", "GET")); }
+      catch (error) { showNotice(error.message, true); }
+    }
+    function renderSavedBusinesses() {
+      const select = document.getElementById("savedBusinessSelect");
+      const query = document.getElementById("savedBusinessFilter").value.trim().toLowerCase();
+      select.replaceChildren();
+      const matches = savedBusinesses.filter(function(item) {
+        return [item.business_name,item.business_type,item.industry,item.city,item.region,item.country]
+          .some(function(value){ return String(value || "").toLowerCase().includes(query); });
+      });
+      if (!matches.length) {
+        const option = node("option", "", savedBusinesses.length ? "No saved businesses match." : "No saved businesses yet.");
+        option.disabled = true;
+        select.appendChild(option);
+        return;
+      }
+      matches.forEach(function(item) {
+        const option = node("option", "", [item.business_name,item.business_type,item.city,item.region].filter(Boolean).join(" · "));
+        option.value = String(item.id);
+        select.appendChild(option);
+      });
+    }
+    async function loadSavedBusinesses() {
+      try { savedBusinesses = await api("/businesses?limit=500", "GET"); renderSavedBusinesses(); }
+      catch (error) { showNotice(error.message, true); }
+    }
+    async function openCampaign(id) {
+      try {
+        currentCampaign = await api("/api/campaigns/" + id, "GET");
+        document.getElementById("campaignListView").hidden = true;
+        document.getElementById("campaignWorkspace").hidden = false;
+        document.getElementById("workspaceTitle").textContent = currentCampaign.title;
+        const brief = [currentCampaign.offer, currentCampaign.proof ? "Evidence: " + currentCampaign.proof : "", currentCampaign.tone + " · " + currentCampaign.language].filter(Boolean).join(" — ");
+        document.getElementById("workspaceBrief").textContent = brief;
+        const discoveryForm = document.getElementById("campaignDiscoveryForm");
+        discoveryForm.elements.business_type.value = currentCampaign.business_type || currentCampaign.industry || "";
+        discoveryForm.elements.location.value = [currentCampaign.region, currentCampaign.country].filter(Boolean).join(", ");
+        document.getElementById("exportCampaign").href = "/api/campaigns/" + id + "/export.csv";
+        renderLeads(currentCampaign);
+      } catch (error) { showNotice(error.message, true); }
+    }
+    function renderLeads(campaign) {
+      const list = document.getElementById("campaignLeads");
+      list.replaceChildren();
+      document.getElementById("leadHeading").textContent = campaign.title + " businesses";
+      const counts = campaign.draft_counts || {};
+      document.getElementById("leadCounts").textContent = campaign.lead_count + " businesses · " + (counts.needs_review || 0) + " drafts to review · " + (counts.approved || 0) + " approved";
+      if (!campaign.leads.length) {
+        list.appendChild(node("div", "campaign-empty", "No businesses in this campaign yet. Use the search above or save businesses with your connected prospecting skill."));
+        return;
+      }
+      campaign.leads.forEach(function(lead) {
+        const card = node("article", "campaign-lead", "");
+        const top = node("div", "campaign-lead-top", "");
+        const identity = node("div", "", "");
+        const title = node("h4", "", "");
+        const select = document.createElement("input");
+        select.type = "checkbox";
+        select.className = "campaign-select draft-select";
+        select.value = String(lead.id);
+        select.checked = lead.draft_status === "not_drafted";
+        title.append(select, document.createTextNode(lead.business_name));
+        identity.appendChild(title);
+        identity.appendChild(node("div", "campaign-lead-meta", [lead.business_type, lead.city, lead.region, lead.country].filter(Boolean).join(" · ")));
+        const website = safeLink(lead.website, lead.website);
+        const source = safeLink(lead.source_url, "OpenStreetMap source");
+        if (website) identity.appendChild(website);
+        const status = node("span", "campaign-status status-" + lead.draft_status, (lead.draft_status || "not_drafted").replaceAll("_", " "));
+        top.append(identity, status);
+        card.appendChild(top);
+        const fit = node("p", "campaign-lead-meta", lead.fit_summary || "");
+        fit.style.margin = "7px 0 0";
+        card.appendChild(fit);
+        if (source) card.appendChild(source);
+        const stage = document.createElement("select");
+        [["new","New"],["contacted","Contacted"],["replied","Replied"],["won","Won"],["lost","Lost"]].forEach(function(pair){
+          const option = node("option", "", pair[1]);
+          option.value = pair[0];
+          stage.appendChild(option);
+        });
+        stage.value = lead.pipeline_stage || "new";
+        const stageLabel = node("label", "campaign-editor-label", "Campaign stage");
+        stageLabel.appendChild(stage);
+        const subject = document.createElement("input");
+        subject.maxLength = 240;
+        subject.value = lead.draft_subject || "";
+        subject.placeholder = "Optional email subject";
+        const subjectLabel = node("label", "campaign-editor-label", "Subject");
+        subjectLabel.appendChild(subject);
+        const body = document.createElement("textarea");
+        body.maxLength = 3000;
+        body.value = lead.draft_body || "";
+        body.placeholder = "Generate a draft, then edit it here before approving or copying.";
+        const bodyLabel = node("label", "campaign-editor-label", "Review and edit draft");
+        bodyLabel.appendChild(body);
+        card.append(stageLabel, subjectLabel, bodyLabel);
+        const actions = node("div", "campaign-lead-actions", "");
+        function action(label, className, handler) {
+          const button = node("button", className || "", label);
+          button.type = "button";
+          button.addEventListener("click", handler);
+          actions.appendChild(button);
+        }
+        async function updateDraft(statusValue) {
+          try {
+            const payload = {draft_subject:subject.value, draft_body:body.value, pipeline_stage:stage.value};
+            if (statusValue) payload.draft_status = statusValue;
+            await api("/api/campaigns/" + campaign.id + "/leads/" + lead.id, "PATCH", payload);
+            showNotice(statusValue === "approved" ? "Draft marked approved. It has not been sent." : statusValue === "rejected" ? "Draft rejected." : "Draft saved for review.", false);
+            await openCampaign(campaign.id);
+            await loadCampaigns();
+          } catch (error) { showNotice(error.message, true); }
+        }
+        action("Save edits", "", function(){ updateDraft(); });
+        action("Approve draft", "approve-button", function(){ updateDraft("approved"); });
+        action("Reject", "reject-button", function(){ updateDraft("rejected"); });
+        action("Copy text", "", async function(){
+          if (!body.value.trim()) { showNotice("Write or generate a draft first.", true); return; }
+          try { await navigator.clipboard.writeText(body.value); showNotice("Draft copied. Review it before sending.", false); }
+          catch (_) { showNotice("Copy was blocked by the browser. Select and copy the draft text manually.", true); }
+        });
+        action("Remove from campaign", "", async function(){
+          if (!window.confirm("Remove this business from the campaign? The saved business record will remain.")) return;
+          try { await api("/api/campaigns/" + campaign.id + "/leads/" + lead.id, "DELETE"); showNotice("Business removed from this campaign.", false); await openCampaign(campaign.id); await loadCampaigns(); }
+          catch (error) { showNotice(error.message, true); }
+        });
+        card.appendChild(actions);
+        list.appendChild(card);
+      });
+    }
+    document.getElementById("campaignCreateForm").addEventListener("submit", async function(event) {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = Object.fromEntries(new FormData(form).entries());
+      try {
+        const campaign = await api("/api/campaigns", "POST", data);
+        form.reset();
+        showNotice("Campaign created. Search for businesses to add them.", false);
+        await loadCampaigns();
+        await openCampaign(campaign.id);
+      } catch (error) { showNotice(error.message, true); }
+    });
+    document.getElementById("campaignDiscoveryForm").addEventListener("submit", async function(event) {
+      event.preventDefault();
+      if (!currentCampaign) return;
+      const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+      data.radius_m = Number(data.radius_m);
+      const button = event.currentTarget.querySelector("button[type=submit]");
+      button.disabled = true;
+      button.textContent = "Searching…";
+      try {
+        const result = await api("/api/campaigns/" + currentCampaign.id + "/discover", "POST", data);
+        showNotice("Found " + result.found + " listings; added " + result.added_to_campaign + " to this campaign. " + result.attribution + " · " + result.license + ".", false);
+        currentCampaign = result.campaign;
+        renderLeads(currentCampaign);
+        await loadCampaigns();
+      } catch (error) { showNotice(error.message, true); }
+      finally { button.disabled = false; button.textContent = "Find businesses"; }
+    });
+    document.getElementById("savedBusinessFilter").addEventListener("input", renderSavedBusinesses);
+    document.getElementById("addSavedBusinesses").addEventListener("click", async function() {
+      if (!currentCampaign) return;
+      const ids = Array.from(document.getElementById("savedBusinessSelect").selectedOptions)
+        .map(function(option){ return Number(option.value); }).filter(function(id){ return Number.isInteger(id) && id > 0; });
+      if (!ids.length) { showNotice("Select at least one saved business.", true); return; }
+      if (ids.length > 50) { showNotice("Choose up to 50 businesses at a time.", true); return; }
+      try {
+        currentCampaign = await api("/api/campaigns/" + currentCampaign.id + "/leads", "POST", {prospect_ids:ids});
+        showNotice("Added " + ids.length + " saved business selection(s) to this campaign.", false);
+        renderLeads(currentCampaign);
+        await loadCampaigns();
+      } catch (error) { showNotice(error.message, true); }
+    });
+    document.getElementById("generateDrafts").addEventListener("click", async function() {
+      if (!currentCampaign) return;
+      const selected = Array.from(document.querySelectorAll(".draft-select:checked")).map(function(item){ return Number(item.value); });
+      if (!selected.length) { showNotice("Select at least one business without a draft.", true); return; }
+      if (selected.length > 10) { showNotice("Choose up to 10 businesses per AI request.", true); return; }
+      const button = document.getElementById("generateDrafts");
+      button.disabled = true;
+      button.textContent = "Writing drafts…";
+      try {
+        currentCampaign = await api("/api/campaigns/" + currentCampaign.id + "/drafts", "POST", {prospect_ids:selected});
+        const localTemplates = currentCampaign.leads.some(function(lead){ return selected.includes(lead.id) && String(lead.draft_reason || "").startsWith("Local template"); });
+        showNotice(localTemplates ? "Local template drafts are ready for your review. Nothing has been sent." : "AI drafts are ready for your review. Nothing has been sent.", false);
+        renderLeads(currentCampaign);
+        await loadCampaigns();
+      } catch (error) { showNotice(error.message, true); }
+      finally { button.disabled = false; button.textContent = "Generate drafts for selected (up to 10)"; }
+    });
+    document.getElementById("backToCampaigns").addEventListener("click", function() {
+      document.getElementById("campaignWorkspace").hidden = true;
+      document.getElementById("campaignListView").hidden = false;
+      loadCampaigns();
+    });
+    renderSavedBusinesses();
+    loadCampaigns();
+    loadSavedBusinesses();
   </script>
 </body>
 </html>"""

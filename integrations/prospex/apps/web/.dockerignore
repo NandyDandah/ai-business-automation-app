@@ -1,8 +1,0 @@
-node_modules
-.next
-.env
-.env.*
-*.md
-.git
-.gitignore
-tsconfig.tsbuildinfo

@@ -1,3 +1,0 @@
--- AlterTable
-ALTER TABLE "leads" ADD COLUMN     "lat" DOUBLE PRECISION,
-ADD COLUMN     "lng" DOUBLE PRECISION;

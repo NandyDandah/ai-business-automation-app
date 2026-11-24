@@ -14,6 +14,7 @@ A Python/FastAPI web app that helps small businesses automate customer message h
 - CSV export
 - Industry-neutral business prospect records with a protected browser database
 - Optional Hunter and Apollo enrichment with source, provider, status, and confidence kept separate from business-published details
+- Protected campaign studio with OpenStreetMap lead discovery, campaign stages, review-only outreach drafts, and CSV export
 - SQLite for local development and PostgreSQL for hosted use
 
 ## Tech Stack
@@ -86,8 +87,10 @@ The prospect finder uses Agensi MCP tools at run time. It can use Google Maps or
 The API supports generic business/location fields, business-published contact details, and separate Hunter/Apollo enrichment fields. The old `/prospects` routes and clinic-specific request keys remain as aliases for compatibility. The protected `/prospect-database` page shows those fields separately. The skill only saves records when asked and when the caller already has a private API token configured. Use localhost only for an agent running on the same computer. A remote agent needs a privately accessible HTTPS API; never expose a database file.
 
 
-## Included open-source companion
+## Campaign Studio
 
-The upstream [Prospex AI sales and marketing application](https://github.com/asiifdev/business-leads-ai-automation) is included as a separate source snapshot in [`integrations/prospex`](integrations/prospex/README.md) at commit `ac477d791bf824cb0060e1e8da4d5d4aaebd5354`. Its original attribution, AGPL-3.0-or-later license, and commercial-license notice are preserved. Generated Playwright report output and Git metadata were left out.
+The protected `/campaigns` workspace brings the lead-to-review workflow from [Prospex](https://github.com/asiifdev/business-leads-ai-automation) into this FastAPI app: create a campaign brief, discover source-linked businesses from OpenStreetMap, add businesses already saved by the Business Prospect Finder / Apollo / Hunter workflow, track campaign stages, generate and edit personalized drafts, approve or reject them, copy text, and export a campaign CSV. It is implemented natively here; the separate Prospex application source is not bundled.
 
-Prospex is a separate Next.js/NestJS application with its own Node.js, pnpm, Docker, PostgreSQL, and Redis requirements. The existing Render service still runs this repository's FastAPI app; adding the source snapshot does not deploy or activate Prospex. Follow its own README and review its licensing and service-specific settings before hosting or using its outreach features.
+Map searches are started by the signed-in owner, limited to 40 results, cached for six hours per search, and geocoded at no more than one request per second. The app uses configurable Nominatim and Overpass endpoints (`OSM_NOMINATIM_URL`, `OSM_OVERPASS_URL`) and shows OpenStreetMap attribution in the app and CSV exports. OpenStreetMap data are under the ODbL; review its attribution/share-alike terms before redistributing a derived dataset. The public Nominatim service is a shared community resource with strict usage limits; switch to another suitable provider if usage grows. See [OpenStreetMap copyright](https://www.openstreetmap.org/copyright), the [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/), and [Overpass API guidance](https://wiki.openstreetmap.org/wiki/Overpass_API).
+
+Draft generation works without an AI key by creating a simple local template from the offer and business listing. To use AI instead, configure `OPENAI_API_KEY`; `OPENAI_MODEL` and `OPENAI_BASE_URL` can be set for the chosen provider. A deliberate button click then sends the campaign brief plus selected business listing fields (name, type, area, and website) to that provider; saved contact names, email addresses, and phone numbers are excluded. Avoid putting personal or confidential information in campaign briefs. Each generation covers at most 10 businesses and may incur provider charges. Drafts remain unsent: approving only marks them ready to copy or export. The app does not send email or WhatsApp messages automatically.

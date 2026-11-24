@@ -20,15 +20,18 @@ from sqlalchemy.orm import Session
 
 load_dotenv()
 
-from app.database import SessionLocal, Automation, HomeownerInquiry, Prospect, create_tables
+from app.database import (
+    SessionLocal, Automation, Campaign, CampaignProspect, HomeownerInquiry, Prospect, create_tables,
+)
 from app.ai_service import analyse_business_message
+from app.prospecting import ProspectingError, discover_openstreetmap_businesses, draft_outreach_messages
 from app.security import (
     LOGIN_CSRF_MAX_AGE, SESSION_MAX_AGE, create_login_csrf, create_session,
     create_public_form_csrf, get_session_csrf_token, load_auth_config, verify_api_token,
     verify_login_csrf, verify_password, verify_public_form_csrf,
 )
 from app.ui import (
-    BUSINESS_DATABASE_PAGE, DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE, RETROFIT_INQUIRIES_PAGE,
+    BUSINESS_DATABASE_PAGE, CAMPAIGNS_PAGE, DASHBOARD_PAGE, HOME_PAGE, PIPELINE_PAGE, RETROFIT_INQUIRIES_PAGE,
     build_login_page, build_protected_page, build_public_privacy_page, build_public_retrofit_page,
     build_retrofit_thanks_page,
 )
@@ -309,6 +312,51 @@ class BusinessEnrichmentInput(BaseModel):
     enrichment_source_url: Optional[str] = Field(default=None, max_length=1000)
 
 
+class CampaignCreateInput(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    industry: str = Field(default="", max_length=120)
+    business_type: str = Field(default="", max_length=120)
+    region: str = Field(default="", max_length=120)
+    country: str = Field(default="", max_length=120)
+    offer: str = Field(default="", max_length=3000)
+    proof: str = Field(default="", max_length=1500)
+    tone: str = Field(default="Professional", max_length=80)
+    language: str = Field(default="English", max_length=80)
+
+    @root_validator(skip_on_failure=True)
+    def require_campaign_title(cls, values):
+        if not values.get("title", "").strip():
+            raise ValueError("title is required")
+        return values
+
+
+class CampaignDiscoveryInput(BaseModel):
+    business_type: str = Field(min_length=2, max_length=120)
+    location: str = Field(min_length=2, max_length=120)
+    radius_m: Literal[1000, 3000, 5000, 10000] = 5000
+
+
+class CampaignLeadsInput(BaseModel):
+    prospect_ids: list[int] = Field(min_items=1, max_items=50)
+
+
+class CampaignDraftInput(BaseModel):
+    prospect_ids: list[int] = Field(min_items=1, max_items=10)
+
+
+class CampaignLeadUpdateInput(BaseModel):
+    draft_subject: Optional[str] = Field(default=None, max_length=240)
+    draft_body: Optional[str] = Field(default=None, max_length=3000)
+    draft_status: Optional[Literal["needs_review", "approved", "rejected"]] = None
+    pipeline_stage: Optional[Literal["new", "contacted", "replied", "won", "lost"]] = None
+
+    @root_validator(skip_on_failure=True)
+    def require_update_value(cls, values):
+        if all(value is None for value in values.values()):
+            raise ValueError("At least one draft field is required")
+        return values
+
+
 class HomeownerInquiryReview(BaseModel):
     status: Literal["new", "reviewing", "qualified", "matched", "contacted", "survey_booked", "closed"]
     matched_installer_id: Optional[int] = None
@@ -457,6 +505,11 @@ def pipeline(request: Request):
 @app.get("/prospect-database", response_class=HTMLResponse)
 def prospect_database(request: Request):
     return _protected_page(BUSINESS_DATABASE_PAGE, request)
+
+
+@app.get("/campaigns", response_class=HTMLResponse)
+def campaigns_page(request: Request):
+    return _protected_page(CAMPAIGNS_PAGE, request)
 
 
 def _public_retrofit_response(message="", status_code=200):
@@ -717,6 +770,46 @@ def _prospect_dict(record: Prospect):
     }
 
 
+def _campaign_detail(db: Session, campaign: Campaign):
+    joined = (
+        db.query(CampaignProspect, Prospect)
+        .join(Prospect, Prospect.id == CampaignProspect.prospect_id)
+        .filter(CampaignProspect.campaign_id == campaign.id)
+        .order_by(CampaignProspect.created_at.desc())
+        .all()
+    )
+    leads = []
+    for campaign_lead, prospect in joined:
+        item = _prospect_dict(prospect)
+        item.update({
+            "draft_subject": campaign_lead.draft_subject or "",
+            "draft_body": campaign_lead.draft_body or "",
+            "draft_reason": campaign_lead.draft_reason or "",
+            "draft_status": campaign_lead.draft_status or "not_drafted",
+            "pipeline_stage": campaign_lead.pipeline_stage or "new",
+            "draft_updated_at": campaign_lead.updated_at.isoformat() if campaign_lead.updated_at else "",
+        })
+        leads.append(item)
+    counts = {state: sum(1 for item in leads if item["draft_status"] == state)
+              for state in ("not_drafted", "needs_review", "approved", "rejected")}
+    return {
+        "id": campaign.id,
+        "title": campaign.title,
+        "industry": campaign.industry or "",
+        "business_type": campaign.business_type or "",
+        "region": campaign.region or "",
+        "country": campaign.country or "",
+        "offer": campaign.offer or "",
+        "proof": campaign.proof or "",
+        "tone": campaign.tone or "Professional",
+        "language": campaign.language or "English",
+        "created_at": campaign.created_at.isoformat() if campaign.created_at else "",
+        "lead_count": len(leads),
+        "draft_counts": counts,
+        "leads": leads,
+    }
+
+
 @app.post("/businesses/batch")
 @app.post("/prospects/batch")
 def save_businesses(payload: ProspectBatch, db: Session = Depends(get_db)):
@@ -775,6 +868,7 @@ def delete_business(record_id: int, db: Session = Depends(get_db)):
     record = db.query(Prospect).filter(Prospect.id == record_id).first()
     if not record:
         return {"deleted": False, "message": "Prospect not found"}
+    db.query(CampaignProspect).filter(CampaignProspect.prospect_id == record_id).delete(synchronize_session=False)
     db.delete(record)
     db.commit()
     return {"deleted": True}
@@ -794,4 +888,284 @@ def update_business_enrichment(
         setattr(record, field, value.strip() if value is not None else "")
     db.commit()
     return {"updated": True, "id": record.id, "enrichment_provider": record.enrichment_provider}
+
+
+@app.get("/api/campaigns")
+def list_campaigns(db: Session = Depends(get_db)):
+    campaigns = db.query(Campaign).order_by(Campaign.created_at.desc()).limit(100).all()
+    result = []
+    for campaign in campaigns:
+        item = _campaign_detail(db, campaign)
+        item.pop("leads", None)
+        result.append(item)
+    return result
+
+
+@app.post("/api/campaigns")
+def create_campaign(payload: CampaignCreateInput, db: Session = Depends(get_db)):
+    campaign = Campaign(
+        title=payload.title.strip(),
+        industry=payload.industry.strip(),
+        business_type=payload.business_type.strip(),
+        region=payload.region.strip(),
+        country=payload.country.strip(),
+        offer=payload.offer.strip(),
+        proof=payload.proof.strip(),
+        tone=payload.tone.strip() or "Professional",
+        language=payload.language.strip() or "English",
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+    return _campaign_detail(db, campaign)
+
+
+@app.get("/api/campaigns/{campaign_id}")
+def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return _campaign_detail(db, campaign)
+
+
+@app.post("/api/campaigns/{campaign_id}/discover")
+def discover_campaign_businesses(
+    campaign_id: int,
+    payload: CampaignDiscoveryInput,
+    db: Session = Depends(get_db),
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    search_location = payload.location.strip()
+    qualifiers = [value.strip() for value in (campaign.region, campaign.country) if value and value.strip()]
+    if qualifiers and not all(value.lower() in search_location.lower() for value in qualifiers):
+        search_location = ", ".join([search_location] + qualifiers)
+    try:
+        result = discover_openstreetmap_businesses(
+            payload.business_type.strip(), search_location, payload.radius_m, limit=40
+        )
+    except ProspectingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    created = 0
+    linked = 0
+    duplicates = 0
+    try:
+        for found in result["results"]:
+            item = ProspectInput(
+                business_name=found["business_name"],
+                industry=campaign.industry or payload.business_type.strip(),
+                business_type=found.get("business_type", ""),
+                website=found.get("website", ""),
+                city=found.get("city", ""),
+                region=found.get("region", ""),
+                country=found.get("country", ""),
+                postal_code=found.get("postal_code", ""),
+                business_email=found.get("business_email", ""),
+                business_phone=found.get("business_phone", ""),
+                source_url=found["source_url"],
+                contact_source_url=found.get("contact_source_url", ""),
+                fit_score=found.get("fit_score", 0),
+                fit_summary=found.get("fit_summary", ""),
+            )
+            fingerprint = _prospect_fingerprint(item)
+            prospect = db.query(Prospect).filter(Prospect.fingerprint == fingerprint).first()
+            if prospect:
+                duplicates += 1
+            else:
+                prospect = Prospect(
+                    business_name=item.business_name.strip(), industry=item.industry.strip(),
+                    business_type=item.business_type.strip(), website=item.website.strip(),
+                    city=item.city.strip(), region=item.region.strip(), country=item.country.strip(),
+                    postal_code=item.postal_code.strip(), business_email=item.business_email.strip(),
+                    business_phone=item.business_phone.strip(), contact_name="", contact_role="",
+                    source_url=item.source_url.strip(), contact_source_url=item.contact_source_url.strip(),
+                    fit_score=item.fit_score, fit_summary=item.fit_summary.strip(), fingerprint=fingerprint,
+                )
+                db.add(prospect)
+                db.flush()
+                created += 1
+            association = db.query(CampaignProspect).filter(
+                CampaignProspect.campaign_id == campaign_id,
+                CampaignProspect.prospect_id == prospect.id,
+            ).first()
+            if not association:
+                db.add(CampaignProspect(campaign_id=campaign_id, prospect_id=prospect.id))
+                linked += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "found": len(result["results"]),
+        "new_businesses": created,
+        "existing_businesses": duplicates,
+        "added_to_campaign": linked,
+        "location_label": result["location_label"],
+        "attribution": result["attribution"],
+        "license": result["license"],
+        "campaign": _campaign_detail(db, campaign),
+    }
+
+
+@app.post("/api/campaigns/{campaign_id}/leads")
+def add_saved_businesses_to_campaign(
+    campaign_id: int,
+    payload: CampaignLeadsInput,
+    db: Session = Depends(get_db),
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    prospect_ids = list(dict.fromkeys(payload.prospect_ids))
+    prospects = db.query(Prospect).filter(Prospect.id.in_(prospect_ids)).all()
+    if len(prospects) != len(prospect_ids):
+        raise HTTPException(status_code=404, detail="One or more saved businesses were not found")
+    existing_ids = {
+        row[0] for row in db.query(CampaignProspect.prospect_id).filter(
+            CampaignProspect.campaign_id == campaign_id,
+            CampaignProspect.prospect_id.in_(prospect_ids),
+        ).all()
+    }
+    for prospect in prospects:
+        if prospect.id not in existing_ids:
+            db.add(CampaignProspect(campaign_id=campaign_id, prospect_id=prospect.id))
+    db.commit()
+    return _campaign_detail(db, campaign)
+
+
+@app.post("/api/campaigns/{campaign_id}/drafts")
+def generate_campaign_drafts(
+    campaign_id: int,
+    payload: CampaignDraftInput,
+    db: Session = Depends(get_db),
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if not campaign.offer.strip():
+        raise HTTPException(status_code=422, detail="Add your offer to the campaign brief before creating drafts")
+    prospect_ids = list(dict.fromkeys(payload.prospect_ids))
+    if len(prospect_ids) > 10:
+        raise HTTPException(status_code=422, detail="Choose at most 10 businesses at a time")
+    joined = (
+        db.query(CampaignProspect, Prospect)
+        .join(Prospect, Prospect.id == CampaignProspect.prospect_id)
+        .filter(CampaignProspect.campaign_id == campaign_id, CampaignProspect.prospect_id.in_(prospect_ids))
+        .all()
+    )
+    if len(joined) != len(prospect_ids):
+        raise HTTPException(status_code=404, detail="One or more selected businesses are not in this campaign")
+    campaign_info = {
+        "title": campaign.title, "industry": campaign.industry, "business_type": campaign.business_type,
+        "offer": campaign.offer, "proof": campaign.proof, "tone": campaign.tone, "language": campaign.language,
+    }
+    safe_businesses = [
+        {
+            "id": prospect.id,
+            "business_name": prospect.business_name,
+            "industry": prospect.industry or "",
+            "business_type": prospect.business_type or "",
+            "city": prospect.city or "",
+            "region": prospect.region or "",
+            "country": prospect.country or "",
+            "website": prospect.website or "",
+        }
+        for _, prospect in joined
+    ]
+    try:
+        drafts = draft_outreach_messages(campaign_info, safe_businesses)
+    except ProspectingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    by_prospect = {draft["business_id"]: draft for draft in drafts}
+    for campaign_lead, prospect in joined:
+        draft = by_prospect[prospect.id]
+        campaign_lead.draft_subject = draft["subject"]
+        campaign_lead.draft_body = draft["body"]
+        campaign_lead.draft_reason = draft["reason"]
+        campaign_lead.draft_status = "needs_review"
+        campaign_lead.reviewed_at = None
+    db.commit()
+    return _campaign_detail(db, campaign)
+
+
+@app.patch("/api/campaigns/{campaign_id}/leads/{prospect_id}")
+def update_campaign_lead(
+    campaign_id: int,
+    prospect_id: int,
+    payload: CampaignLeadUpdateInput,
+    db: Session = Depends(get_db),
+):
+    campaign_lead = db.query(CampaignProspect).filter(
+        CampaignProspect.campaign_id == campaign_id,
+        CampaignProspect.prospect_id == prospect_id,
+    ).first()
+    if not campaign_lead:
+        raise HTTPException(status_code=404, detail="Business is not in this campaign")
+    values = payload.dict(exclude_unset=True)
+    if "draft_subject" in values:
+        campaign_lead.draft_subject = (values["draft_subject"] or "").strip()
+    if "draft_body" in values:
+        campaign_lead.draft_body = (values["draft_body"] or "").strip()
+    if "draft_status" in values:
+        if values["draft_status"] in {"approved", "rejected"} and not campaign_lead.draft_body:
+            raise HTTPException(status_code=422, detail="Write a draft before approving or rejecting it")
+        campaign_lead.draft_status = values["draft_status"]
+        campaign_lead.reviewed_at = datetime.utcnow() if values["draft_status"] != "needs_review" else None
+    elif "draft_subject" in values or "draft_body" in values:
+        campaign_lead.draft_status = "needs_review" if campaign_lead.draft_body else "not_drafted"
+        campaign_lead.reviewed_at = None
+    if "pipeline_stage" in values:
+        campaign_lead.pipeline_stage = values["pipeline_stage"]
+    campaign_lead.updated_at = datetime.utcnow()
+    db.commit()
+    return {"updated": True, "draft_status": campaign_lead.draft_status}
+
+
+@app.delete("/api/campaigns/{campaign_id}/leads/{prospect_id}")
+def remove_campaign_lead(campaign_id: int, prospect_id: int, db: Session = Depends(get_db)):
+    campaign_lead = db.query(CampaignProspect).filter(
+        CampaignProspect.campaign_id == campaign_id,
+        CampaignProspect.prospect_id == prospect_id,
+    ).first()
+    if not campaign_lead:
+        return {"removed": False}
+    db.delete(campaign_lead)
+    db.commit()
+    return {"removed": True}
+
+
+@app.get("/api/campaigns/{campaign_id}/export.csv")
+def export_campaign(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    joined = (
+        db.query(CampaignProspect, Prospect)
+        .join(Prospect, Prospect.id == CampaignProspect.prospect_id)
+        .filter(CampaignProspect.campaign_id == campaign_id)
+        .order_by(Prospect.business_name.asc())
+        .all()
+    )
+    output = StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow([
+        "Business", "Industry", "Type", "City", "Region", "Country", "Website",
+        "Published email", "Published phone", "Source", "Pipeline stage", "Draft status",
+        "Draft subject", "Draft message", "Data attribution",
+    ])
+    for campaign_lead, prospect in joined:
+        writer.writerow([
+            prospect.business_name, prospect.industry, prospect.business_type, prospect.city, prospect.region,
+            prospect.country, prospect.website, prospect.business_email, prospect.business_phone, prospect.source_url,
+            campaign_lead.pipeline_stage, campaign_lead.draft_status, campaign_lead.draft_subject,
+            campaign_lead.draft_body,
+            "© OpenStreetMap contributors" if "openstreetmap.org" in (prospect.source_url or "") else "",
+        ])
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="campaign-{campaign_id}-leads.csv"'},
+    )
 
